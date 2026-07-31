@@ -1,0 +1,14 @@
+name "dubx"
+description "Thin meta-CLI: redub for builds, dub-publish for registry owner ops"
+authors "amdphreak"
+copyright "Copyright © 2026, amdphreak"
+license "BSL-1.0"
+version "0.1.0"
+
+targetType "executable"
+targetName "dubx"
+
+versions "DubxCli"
+
+importPaths "source"
+sourcePaths "source"
