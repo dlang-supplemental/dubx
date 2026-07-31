@@ -1,0 +1,9 @@
+= Changelog
+
+== 0.1.0 (2026-07-31)
+
+* Initial `dubx` meta-CLI: route build verbs to `redub` (fallback `dub`) and registry verbs to `dub-publish`.
+* `dubx which` reports backend discovery.
+* Escape hatches: `dubx redub|dub|dub-publish …`.
+
+link:changelog-details/2026-07-31 - initial dubx meta-cli.adoc[Details]

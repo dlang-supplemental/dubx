@@ -1,0 +1,11 @@
+= Initial dubx meta-CLI
+
+== Why
+
+`redub` and `dub-publish` solve different gaps in the DUB ecosystem (faster builds vs registry owner automation). Forking either into a mega-CLI would mix concerns. `dubx` is a thin dispatcher so humans and agents have one entrypoint.
+
+== Routing
+
+* Build-ish verbs → `redub`, else `dub`
+* Registry verbs (`publish`, `login`, `hooks`, …) → `dub-publish`
+* Explicit `dubx redub|dub|dub-publish` for passthrough
