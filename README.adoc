@@ -37,14 +37,18 @@ Official `dub` has no publish command; `redub` is a separate build system. `dubx
 
 == Installation
 
-=== Windows (recommended)
+Supported release targets: **windows-x64**, **linux-x64**, **macos-x64**, **macos-arm64** (arm only on macOS).
 
-Download the latest **stable** zip from https://github.com/dlang-supplemental/dubx/releases[Releases], extract, then:
+=== Windows
+
+Download the `windows-x64` zip from https://github.com/dlang-supplemental/dubx/releases[Releases], extract, then:
 
 [source,powershell]
 ----
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ----
+
+Or from nushell: `nu install.nu`
 
 That installs to `%LOCALAPPDATA%\Programs\dlang-supplemental\dubx` and adds it to your **User PATH**. Refresh PATH:
 
@@ -54,11 +58,24 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Env
 dubx version
 ----
 
+[source,nushell]
+----
+$env.PATH = ($env.PATH | prepend $"($env.LOCALAPPDATA)\\Programs\\dlang-supplemental\\dubx")
+----
+
+=== macOS / Linux
+
+[source,console]
+----
+bash ./install.sh
+# or: nu install.nu
+----
+
 A **rolling** prerelease tracks `main` (`tag: rolling`).
 
 Also put backends on PATH:
 
-* **dub-publish** — https://github.com/dlang-supplemental/dub-publish/releases (same install.ps1 pattern)
+* **dub-publish** — https://github.com/dlang-supplemental/dub-publish/releases (same installer pattern)
 * **redub** (or `dub`) for builds — e.g. `dub fetch redub` and put the binary on PATH
 
 === Winget
@@ -67,13 +84,13 @@ Package id: `dlang-supplemental.dubx` (CI ready; first listing needs a one-time 
 
 === From source
 
-Requires `openshellorg/prohelp` at `deps/prohelp` (CI checkouts `v0.2.1`; locally clone or junction it there).
+Requires `openshellorg/prohelp` at `deps/prohelp` (CI checkouts `v0.2.2`; locally clone or junction it there).
 
 [source,console]
 ----
 git clone https://github.com/dlang-supplemental/dubx.git
 cd dubx
-git clone --branch v0.2.1 https://github.com/openshellorg/prohelp.git deps/prohelp
+git clone --branch v0.2.2 https://github.com/openshellorg/prohelp.git deps/prohelp
 dub build --build=release
 ----
 

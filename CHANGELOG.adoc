@@ -1,5 +1,14 @@
 = Changelog
 
+== 0.3.0 (2026-08-06)
+
+* Multi-platform releases: `windows-x64`, `linux-x64`, `macos-x64`, `macos-arm64`.
+* Installers: `install.ps1`, `install.sh`, `install.nu` (nushell PATH hints).
+* Help: install section documents PowerShell / bash / nushell.
+* prohelp `v0.2.2`.
+
+link:changelog-details/2026-08-06 - multiplatform installers.adoc[Details]
+
 == 0.2.1 (2026-08-06)
 
 * Bare invocation shows progressive help (prohelp) and exits 2.

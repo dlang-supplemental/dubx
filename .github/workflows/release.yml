@@ -13,7 +13,7 @@ on:
         type: choice
         options: [auto, rolling, stable]
       tag:
-        description: "Required when channel=stable without a tag push (e.g. v0.2.0)"
+        description: "Required when channel=stable without a tag push (e.g. v0.3.0)"
         required: false
         default: ""
 
@@ -21,8 +21,62 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      channel: ${{ steps.ver.outputs.channel }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        shell: bash
+        run: |
+          INPUT_CHANNEL="${{ inputs.channel }}"
+          if [ -z "$INPUT_CHANNEL" ]; then INPUT_CHANNEL=auto; fi
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            CHANNEL=stable
+            TAG="${{ github.ref_name }}"
+            V="${TAG#v}"
+          elif [ "$INPUT_CHANNEL" = "stable" ]; then
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then echo "Provide tag=vX.Y.Z for stable"; exit 1; fi
+            CHANNEL=stable
+            V="${TAG#v}"
+          else
+            CHANNEL=rolling
+            TAG=rolling
+            BASE="$(tr -d '\r\n' < VERSION)"
+            SHA="${GITHUB_SHA:0:7}"
+            V="${BASE}+${SHA}"
+          fi
+
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$V channel=$CHANNEL tag=$TAG"
+
+  build:
+    needs: meta
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            archive: zip
+          - os: ubuntu-latest
+            target: linux-x64
+            archive: tar.gz
+          - os: macos-13
+            target: macos-x64
+            archive: tar.gz
+          - os: macos-latest
+            target: macos-arm64
+            archive: tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,87 +85,119 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: openshellorg/prohelp
-          ref: v0.2.1
+          ref: v0.2.2
           path: deps/prohelp
 
       - uses: dlang-community/setup-dlang@v1
         with:
           compiler: ldc-latest
 
-      - name: Resolve version and channel
-        id: ver
-        shell: pwsh
-        run: |
-          $inputChannel = "${{ inputs.channel }}"
-          if (-not $inputChannel) { $inputChannel = "auto" }
-
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $channel = "stable"
-            $tag = "${{ github.ref_name }}"
-            $v = $tag.TrimStart("v")
-          } elseif ($inputChannel -eq "stable") {
-            $tag = "${{ inputs.tag }}"
-            if (-not $tag) { throw "Provide tag=vX.Y.Z for stable" }
-            $channel = "stable"
-            $v = $tag.TrimStart("v")
-          } else {
-            $channel = "rolling"
-            $tag = "rolling"
-            $base = (Get-Content VERSION -Raw).Trim()
-            $sha = "${{ github.sha }}".Substring(0, 7)
-            $v = "$base+$sha"
-          }
-
-          Set-Content -Path VERSION -Value $v -NoNewline
-          "version=$v" >> $env:GITHUB_OUTPUT
-          "channel=$channel" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          Write-Host "version=$v channel=$channel tag=$tag"
+      - name: Stamp VERSION
+        shell: bash
+        run: printf '%s' "${{ needs.meta.outputs.version }}" > VERSION
 
       - name: Build
-        shell: pwsh
+        shell: bash
         run: dub build --build=release --compiler=ldc2
 
       - name: Stage package
         id: pkg
-        shell: pwsh
+        shell: bash
         run: |
-          $stage = "stage/dubx"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item dubx.exe $stage/
-          Copy-Item LICENSE $stage/
-          Copy-Item packaging/install.ps1 $stage/
-          Copy-Item README.adoc $stage/
-          if ("${{ steps.ver.outputs.channel }}" -eq "rolling") {
-            $zip = "dubx-windows-x64-rolling.zip"
-          } else {
-            $zip = "dubx-windows-x64-v${{ steps.ver.outputs.version }}.zip"
-          }
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path "$zip.sha256" -Value "$hash  $zip"
-          "asset=$zip" >> $env:GITHUB_OUTPUT
+          set -euo pipefail
+          APP=dubx
+          TARGET="${{ matrix.target }}"
+          CHANNEL="${{ needs.meta.outputs.channel }}"
+          VER="${{ needs.meta.outputs.version }}"
+          STAGE="stage/$APP"
+          mkdir -p "$STAGE"
+
+          if [ -f "${APP}.exe" ]; then
+            cp "${APP}.exe" "$STAGE/"
+          else
+            cp "$APP" "$STAGE/"
+          fi
+          cp LICENSE README.adoc "$STAGE/"
+          cp packaging/install.ps1 packaging/install.sh packaging/install.nu "$STAGE/"
+
+          if [ "$CHANNEL" = "rolling" ]; then
+            BASE="${APP}-${TARGET}-rolling"
+          else
+            BASE="${APP}-${TARGET}-v${VER}"
+          fi
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            ASSET="${BASE}.zip"
+            if command -v zip >/dev/null 2>&1; then
+              (cd stage && zip -r "../$ASSET" "$APP")
+            else
+              tar -C stage -a -cf "$ASSET" "$APP"
+            fi
+          else
+            ASSET="${BASE}.tar.gz"
+            tar -C stage -czf "$ASSET" "$APP"
+          fi
+
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$ASSET" | awk '{print $1"  "$2}' > "${ASSET}.sha256"
+          else
+            shasum -a 256 "$ASSET" | awk '{print $1"  "$2}' > "${ASSET}.sha256"
+          fi
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha256
+
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: ${{ steps.ver.outputs.channel == 'rolling' && format('dubx rolling ({0})', steps.ver.outputs.version) || format('dubx {0}', steps.ver.outputs.tag) }}
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.channel == 'rolling' && format('dubx rolling ({0})', needs.meta.outputs.version) || format('dubx {0}', needs.meta.outputs.tag) }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ steps.ver.outputs.channel == 'rolling' }}
-          make_latest: ${{ steps.ver.outputs.channel == 'stable' }}
-          generate_release_notes: ${{ steps.ver.outputs.channel == 'stable' }}
+          prerelease: ${{ needs.meta.outputs.channel == 'rolling' }}
+          make_latest: ${{ needs.meta.outputs.channel == 'stable' }}
+          generate_release_notes: ${{ needs.meta.outputs.channel == 'stable' }}
           body: |
-            ## Install (Windows)
+            ## Install
 
-            1. Download the `.zip` asset and extract it.
-            2. Run: `powershell -ExecutionPolicy Bypass -File .\install.ps1`
-            3. Also install backends on PATH:
-               - `dub-publish` — https://github.com/dlang-supplemental/dub-publish/releases
-               - `redub` (or `dub`) for builds
+            | Target | Archive | Installer |
+            |---|---|---|
+            | Windows x64 | `dubx-windows-x64-*.zip` | `install.ps1` or `nu install.nu` |
+            | Linux x64 | `dubx-linux-x64-*.tar.gz` | `install.sh` or `nu install.nu` |
+            | macOS Intel | `dubx-macos-x64-*.tar.gz` | `install.sh` or `nu install.nu` |
+            | macOS Apple Silicon | `dubx-macos-arm64-*.tar.gz` | `install.sh` or `nu install.nu` |
 
-            Future winget id: `dlang-supplemental.dubx`
-          files: |
-            ${{ steps.pkg.outputs.asset }}
-            ${{ steps.pkg.outputs.asset }}.sha256
+            ### Windows
+            ```powershell
+            powershell -ExecutionPolicy Bypass -File .\install.ps1
+            # or: nu install.nu
+            ```
+
+            ### macOS / Linux
+            ```bash
+            bash ./install.sh
+            # or: nu install.nu
+            ```
+
+            ### Nushell PATH refresh
+            ```nushell
+            $env.PATH = ($env.PATH | prepend $installDir)
+            ```
+
+            Winget id: `dlang-supplemental.dubx` (Windows)
+          files: release-assets/*

@@ -13,6 +13,16 @@ command "dubx" {
         example "See which backends are on PATH" "dubx which"
     }
 
+    section "install" {
+        summary "Installers (win / mac / linux)"
+        content "Release archives ship install.ps1 (Windows), install.sh (macOS/Linux), and install.nu (nushell wrapper). Targets: windows-x64, linux-x64, macos-x64, macos-arm64."
+
+        example "Windows PowerShell" "powershell -ExecutionPolicy Bypass -File .\\install.ps1"
+        example "nushell" "nu install.nu"
+        example "macOS / Linux bash" "bash ./install.sh"
+        example "Refresh PATH in nushell" "$env.PATH = ($env.PATH | prepend $installDir)"
+    }
+
     section "build" {
         summary "Build verbs -> redub (fallback dub)"
         inline true

@@ -1,0 +1,11 @@
+== 0.3.0 — Multi-platform installers + nushell (2026-08-06)
+
+=== Platforms
+
+* Windows x64, Linux x64, macOS x64, macOS arm64
+* Arm only on macOS
+
+=== Nushell
+
+* `install.nu` entry + PATH refresh hints alongside PowerShell / bash installers
+* Help schema `install` section documents all three
