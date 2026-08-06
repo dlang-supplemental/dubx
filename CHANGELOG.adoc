@@ -1,5 +1,14 @@
 = Changelog
 
+== 0.2.0 (2026-08-06)
+
+* Windows release packaging: zip + `install.ps1` (User PATH).
+* GitHub Release workflow: stable on `v*` tags; **rolling** prerelease on `main`.
+* Winget update CI (`dlang-supplemental.dubx`) gated on `WINGET_TOKEN`.
+* `dubx version` reads `VERSION` / release stamp.
+
+link:changelog-details/2026-08-06 - windows release packaging.adoc[Details]
+
 == 0.1.0 (2026-07-31)
 
 * Initial `dubx` meta-CLI: route build verbs to `redub` (fallback `dub`) and registry verbs to `dub-publish`.

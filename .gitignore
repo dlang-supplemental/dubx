@@ -3,10 +3,12 @@
 !LICENSE
 !README.adoc
 !CHANGELOG.adoc
-!MEMORIES.md
+!VERSION
 !dub.sdl
 !source/
 !source/**
+!packaging/
+!packaging/**
 !docs/
 !docs/**
 !changelog-details/
@@ -25,3 +27,4 @@ dub.selections.json
 *.o
 *.a
 *.log
+MEMORIES.md

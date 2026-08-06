@@ -7,6 +7,8 @@ import std.process : environment, spawnProcess, wait;
 import std.stdio;
 import std.string : toLower;
 
+import version_;
+
 int main(string[] args)
 {
 	if (args.length < 2 || args[1].among!("-h", "--help", "help"))
@@ -21,7 +23,7 @@ int main(string[] args)
 	switch (cmd)
 	{
 	case "version", "--version", "-V":
-		writeln("dubx 0.1.0");
+		writeln("dubx ", dubxVersion);
 		return 0;
 
 	case "which":

@@ -1,0 +1,56 @@
+name: Winget
+
+# Updates microsoft/winget-pkgs after a *stable* GitHub Release.
+# First-time listing still needs a manual wingetcreate / PR bootstrap.
+# Safe without WINGET_TOKEN: job no-ops with a warning.
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Existing stable release tag (e.g. v0.2.0)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  winget:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip prereleases / rolling
+        id: gate
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG: ${{ inputs.release-tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WINGET_TOKEN:-}" ]; then
+            echo "::warning::WINGET_TOKEN not set — skipping winget"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${EVENT_PRERELEASE:-false}" = "true" ]; then
+            echo "::notice::Skipping prerelease"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$TAG" in
+            rolling) echo "::notice::Skipping rolling tag"; echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            v*) ;;
+            *) echo "::warning::Unexpected tag $TAG"; echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Submit to winget-pkgs
+        if: steps.gate.outputs.ok == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: dlang-supplemental.dubx
+          installers-regex: 'dubx-windows-x64-v.*\.zip$'
+          release-tag: ${{ steps.gate.outputs.tag }}
+          token: ${{ secrets.WINGET_TOKEN }}

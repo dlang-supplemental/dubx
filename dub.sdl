@@ -3,7 +3,7 @@ description "Thin meta-CLI: redub for builds, dub-publish for registry owner ops
 authors "amdphreak"
 copyright "Copyright © 2026, amdphreak"
 license "BSL-1.0"
-# Version comes from git tags (vX.Y.Z).
+# Version comes from git tags (vX.Y.Z) / VERSION file for --version.
 
 targetType "executable"
 targetName "dubx"
@@ -12,3 +12,4 @@ versions "DubxCli"
 
 importPaths "source"
 sourcePaths "source"
+stringImportPaths "."

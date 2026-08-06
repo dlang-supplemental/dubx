@@ -37,6 +37,36 @@ Official `dub` has no publish command; `redub` is a separate build system. `dubx
 
 == Installation
 
+=== Windows (recommended)
+
+Download the latest **stable** zip from https://github.com/dlang-supplemental/dubx/releases[Releases], extract, then:
+
+[source,powershell]
+----
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+----
+
+That installs to `%LOCALAPPDATA%\Programs\dlang-supplemental\dubx` and adds it to your **User PATH**. Refresh PATH:
+
+[source,powershell]
+----
+$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+dubx version
+----
+
+A **rolling** prerelease tracks `main` (`tag: rolling`).
+
+Also put backends on PATH:
+
+* **dub-publish** — https://github.com/dlang-supplemental/dub-publish/releases (same install.ps1 pattern)
+* **redub** (or `dub`) for builds — e.g. `dub fetch redub` and put the binary on PATH
+
+=== Winget
+
+Package id: `dlang-supplemental.dubx` (CI ready; first listing needs a one-time winget-pkgs PR + `WINGET_TOKEN`).
+
+=== From source
+
 [source,console]
 ----
 git clone https://github.com/dlang-supplemental/dubx.git
@@ -44,18 +74,7 @@ cd dubx
 dub build --build=release
 ----
 
-Put `dubx` on your `PATH`, plus the backends you use:
-
-[source,console]
-----
-# build backend (recommended)
-dub fetch redub
-# put the redub binary on PATH, or: dub run redub -- build
-
-# registry backend
-git clone https://github.com/dlang-supplemental/dub-publish.git
-cd dub-publish && dub build --build=release
-----
+Then `packaging/install.ps1` or put `dubx` on `PATH`.
 
 Check discovery:
 

@@ -1,0 +1,10 @@
+= Windows release packaging and PATH install
+
+Same shipping story as `dub-publish`: consumable GitHub Releases so a local clone is optional.
+
+== What
+
+* `packaging/install.ps1` — per-user install + User PATH
+* Release workflow — stable (`v*`) and rolling (`main` → tag `rolling`)
+* Winget workflow — ready once `WINGET_TOKEN` exists and package is bootstrapped
+* `dubx version` from `VERSION` string import

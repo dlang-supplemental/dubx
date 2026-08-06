@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Force channel (auto: tag→stable, main→rolling)"
+        required: false
+        default: auto
+        type: choice
+        options: [auto, rolling, stable]
+      tag:
+        description: "Required when channel=stable without a tag push (e.g. v0.2.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dlang-community/setup-dlang@v1
+        with:
+          compiler: ldc-latest
+
+      - name: Resolve version and channel
+        id: ver
+        shell: pwsh
+        run: |
+          $inputChannel = "${{ inputs.channel }}"
+          if (-not $inputChannel) { $inputChannel = "auto" }
+
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $channel = "stable"
+            $tag = "${{ github.ref_name }}"
+            $v = $tag.TrimStart("v")
+          } elseif ($inputChannel -eq "stable") {
+            $tag = "${{ inputs.tag }}"
+            if (-not $tag) { throw "Provide tag=vX.Y.Z for stable" }
+            $channel = "stable"
+            $v = $tag.TrimStart("v")
+          } else {
+            $channel = "rolling"
+            $tag = "rolling"
+            $base = (Get-Content VERSION -Raw).Trim()
+            $sha = "${{ github.sha }}".Substring(0, 7)
+            $v = "$base+$sha"
+          }
+
+          Set-Content -Path VERSION -Value $v -NoNewline
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "version=$v channel=$channel tag=$tag"
+
+      - name: Build
+        shell: pwsh
+        run: dub build --build=release --compiler=ldc2
+
+      - name: Stage package
+        id: pkg
+        shell: pwsh
+        run: |
+          $stage = "stage/dubx"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item dubx.exe $stage/
+          Copy-Item LICENSE $stage/
+          Copy-Item packaging/install.ps1 $stage/
+          Copy-Item README.adoc $stage/
+          if ("${{ steps.ver.outputs.channel }}" -eq "rolling") {
+            $zip = "dubx-windows-x64-rolling.zip"
+          } else {
+            $zip = "dubx-windows-x64-v${{ steps.ver.outputs.version }}.zip"
+          }
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$zip.sha256" -Value "$hash  $zip"
+          "asset=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.channel == 'rolling' && format('dubx rolling ({0})', steps.ver.outputs.version) || format('dubx {0}', steps.ver.outputs.tag) }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ steps.ver.outputs.channel == 'rolling' }}
+          make_latest: ${{ steps.ver.outputs.channel == 'stable' }}
+          generate_release_notes: ${{ steps.ver.outputs.channel == 'stable' }}
+          body: |
+            ## Install (Windows)
+
+            1. Download the `.zip` asset and extract it.
+            2. Run: `powershell -ExecutionPolicy Bypass -File .\install.ps1`
+            3. Also install backends on PATH:
+               - `dub-publish` — https://github.com/dlang-supplemental/dub-publish/releases
+               - `redub` (or `dub`) for builds
+
+            Future winget id: `dlang-supplemental.dubx`
+          files: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha256
