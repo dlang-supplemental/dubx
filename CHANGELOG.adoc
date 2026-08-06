@@ -1,5 +1,9 @@
 = Changelog
 
+== 0.3.2 (2026-08-06)
+
+* Fix `install.ps1` parse error in PATH hint lines.
+
 == 0.3.1 (2026-08-06)
 
 * Fix Windows zip packaging; build `macos-x64` via LDC `--arch=x86_64` on `macos-latest`.
