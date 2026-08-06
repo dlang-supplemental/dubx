@@ -1,5 +1,9 @@
 = Changelog
 
+== 0.3.1 (2026-08-06)
+
+* Fix Windows zip packaging; build `macos-x64` via LDC `--arch=x86_64` on `macos-latest`.
+
 == 0.3.0 (2026-08-06)
 
 * Multi-platform releases: `windows-x64`, `linux-x64`, `macos-x64`, `macos-arm64`.

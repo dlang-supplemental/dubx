@@ -71,12 +71,14 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             archive: tar.gz
-          - os: macos-13
-            target: macos-x64
-            archive: tar.gz
           - os: macos-latest
             target: macos-arm64
             archive: tar.gz
+            arch: ""
+          - os: macos-latest
+            target: macos-x64
+            archive: tar.gz
+            arch: x86_64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,7 +100,12 @@ jobs:
 
       - name: Build
         shell: bash
-        run: dub build --build=release --compiler=ldc2
+        run: |
+          if [ -n "${{ matrix.arch }}" ]; then
+            dub build --build=release --compiler=ldc2 --arch=${{ matrix.arch }}
+          else
+            dub build --build=release --compiler=ldc2
+          fi
 
       - name: Stage package
         id: pkg
@@ -128,11 +135,7 @@ jobs:
 
           if [ "${{ matrix.archive }}" = "zip" ]; then
             ASSET="${BASE}.zip"
-            if command -v zip >/dev/null 2>&1; then
-              (cd stage && zip -r "../$ASSET" "$APP")
-            else
-              tar -C stage -a -cf "$ASSET" "$APP"
-            fi
+            powershell.exe -NoProfile -Command "Compress-Archive -Path 'stage/$APP/*' -DestinationPath '$ASSET' -Force"
           else
             ASSET="${BASE}.tar.gz"
             tar -C stage -czf "$ASSET" "$APP"
