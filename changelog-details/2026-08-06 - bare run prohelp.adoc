@@ -1,0 +1,5 @@
+== 0.2.1 — Progressive help on bare run (2026-08-06)
+
+* Bare `dubx` shows embedded prohelp and exits 2 (same progressive help path as `?` / `help`).
+* Depends on `openshellorg/prohelp` `v0.2.1` via `deps/prohelp` (Windows `user32` link for clipboard).
+* CI checkouts that tag into `deps/prohelp` before `dub build`.

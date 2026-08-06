@@ -10,6 +10,13 @@ targetName "dubx"
 
 versions "DubxCli"
 
+# CI checkouts openshellorg/prohelp@v0.2.1 into deps/prohelp (see workflows).
+# Local: junction or clone — e.g. mklink /J deps\prohelp C:\code\github.com\dev-centr\prohelp
+dependency "prohelp" path="deps/prohelp"
+dependency "sdlang-d" version="~>0.10.6"
+
 importPaths "source"
 sourcePaths "source"
 stringImportPaths "."
+
+libs "user32" platform="windows"

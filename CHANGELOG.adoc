@@ -1,5 +1,12 @@
 = Changelog
 
+== 0.2.1 (2026-08-06)
+
+* Bare invocation shows progressive help (prohelp) and exits 2.
+* Dependency: `openshellorg/prohelp` `v0.2.1` (`deps/prohelp`).
+
+link:changelog-details/2026-08-06 - bare run prohelp.adoc[Details]
+
 == 0.2.0 (2026-08-06)
 
 * Windows release packaging: zip + `install.ps1` (User PATH).

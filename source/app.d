@@ -8,13 +8,41 @@ import std.stdio;
 import std.string : toLower;
 
 import version_;
+import prohelp.config;
+import prohelp.intercept;
+
+private enum embeddedHelpSdl = import("help.sdl");
+
+private InterceptConfig helpConfig()
+{
+	return InterceptConfig.fromContent(embeddedHelpSdl, "help.sdl");
+}
+
+private void showHelp(string[] args)
+{
+	auto helpArgs = args.dup;
+	if (helpArgs.length < 2)
+		helpArgs ~= "?";
+	prohelp.intercept.intercept(helpArgs, helpConfig());
+}
 
 int main(string[] args)
 {
-	if (args.length < 2 || args[1].among!("-h", "--help", "help"))
+	if (args.length < 2)
 	{
-		printHelp();
-		return args.length < 2 ? 2 : 0;
+		showHelp([args[0], "?"]);
+		return 2;
+	}
+
+	{
+		auto t = args[1].toLower;
+		if (t == "?" || t == "help" || t == "--help" || t == "-h" || t == "--?"
+			|| t.startsWith("?:") || t.startsWith("help:") || t.startsWith("--help:")
+			|| t.startsWith("-h:") || t.startsWith("--?:"))
+		{
+			showHelp(args);
+			return 0;
+		}
 	}
 
 	auto cmd = args[1].toLower;
@@ -178,26 +206,6 @@ string findOnPath(string name)
 
 void printHelp()
 {
-	writeln(`dubx — thin meta-CLI for D package workflows
-
-Routes common verbs to the right tool:
-  build/run/test/...  →  redub (fallback: dub)
-  publish/register/login/hooks/...  →  dub-publish
-
-Usage:
-  dubx build [args...]
-  dubx run [args...]
-  dubx test [args...]
-  dubx publish|register [args...]
-  dubx login|logout|update|status|hooks [...]
-  dubx which [redub|dub|dub-publish...]
-  dubx redub [args...]          # force redub
-  dubx dub [args...]            # force dub
-  dubx dub-publish [args...]    # force dub-publish
-  dubx help
-
-Install backends separately and put them on PATH:
-  redub        https://code.dlang.org/packages/redub
-  dub-publish  https://github.com/dlang-supplemental/dub-publish
-`);
+	showHelp(["dubx", "?"]);
 }
+

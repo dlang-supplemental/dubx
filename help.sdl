@@ -1,0 +1,42 @@
+command "dubx" {
+    summary "Thin meta-CLI for D package workflows"
+    description "Routes verbs to the right backend without reimplementing them: redub (or dub) for builds, dub-publish for registry owner ops."
+
+    section "usage" {
+        summary "How to invoke"
+        content "dubx <verb> [args...]"
+
+        example "Show this help" "dubx"
+        example "Progressive help / TUI" "dubx ?"
+        example "Build with redub/dub" "dubx build"
+        example "Register via dub-publish" "dubx publish --ignore-fork"
+        example "See which backends are on PATH" "dubx which"
+    }
+
+    section "build" {
+        summary "Build verbs -> redub (fallback dub)"
+        inline true
+        content "build run test describe lint clean fetch upgrade add convert search list ..."
+
+        example "Force dub" "dubx dub build"
+        example "Force redub" "dubx redub build"
+    }
+
+    section "registry" {
+        summary "Registry verbs -> dub-publish"
+        inline true
+        content "publish register login logout update status hooks logo docs-url categories ..."
+
+        example "Passthrough" "dubx dub-publish status -n mypkg"
+    }
+
+    section "discovery" {
+        summary "Backend discovery"
+        content "dubx which [redub|dub|dub-publish]"
+    }
+
+    section "backends" {
+        summary "Install separately on PATH"
+        content "redub: code.dlang.org/packages/redub — dub-publish: github.com/dlang-supplemental/dub-publish/releases"
+    }
+}

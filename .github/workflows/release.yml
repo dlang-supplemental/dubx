@@ -28,6 +28,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/checkout@v4
+        with:
+          repository: openshellorg/prohelp
+          ref: v0.2.1
+          path: deps/prohelp
+
       - uses: dlang-community/setup-dlang@v1
         with:
           compiler: ldc-latest

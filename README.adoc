@@ -67,10 +67,13 @@ Package id: `dlang-supplemental.dubx` (CI ready; first listing needs a one-time 
 
 === From source
 
+Requires `openshellorg/prohelp` at `deps/prohelp` (CI checkouts `v0.2.1`; locally clone or junction it there).
+
 [source,console]
 ----
 git clone https://github.com/dlang-supplemental/dubx.git
 cd dubx
+git clone --branch v0.2.1 https://github.com/openshellorg/prohelp.git deps/prohelp
 dub build --build=release
 ----
 
