@@ -1,13 +1,41 @@
+ifndef::env-github[:icons: font]
+:toc: preamble
+:toclevels: 2
+:sectanchors:
+
+ifndef::env-github[]
+image:https://img.shields.io/github/contributors/dlang-supplemental/dubx.svg?style=for-the-badge[Contributors,link=https://github.com/dlang-supplemental/dubx/graphs/contributors]
+image:https://img.shields.io/github/forks/dlang-supplemental/dubx.svg?style=for-the-badge[Forks,link=https://github.com/dlang-supplemental/dubx/network/members]
+image:https://img.shields.io/github/stars/dlang-supplemental/dubx.svg?style=for-the-badge[Stars,link=https://github.com/dlang-supplemental/dubx/stargazers]
+image:https://img.shields.io/github/issues/dlang-supplemental/dubx.svg?style=for-the-badge[Issues,link=https://github.com/dlang-supplemental/dubx/issues]
+image:https://img.shields.io/github/license/dlang-supplemental/dubx.svg?style=for-the-badge[License,link=https://github.com/dlang-supplemental/dubx/blob/main/LICENSE]
+endif::[]
+
+ifdef::env-github[]
+image:https://img.shields.io/github/contributors/dlang-supplemental/dubx.svg?style=for-the-badge[Contributors]
+image:https://img.shields.io/github/forks/dlang-supplemental/dubx.svg?style=for-the-badge[Forks]
+image:https://img.shields.io/github/stars/dlang-supplemental/dubx.svg?style=for-the-badge[Stars]
+image:https://img.shields.io/github/issues/dlang-supplemental/dubx.svg?style=for-the-badge[Issues]
+image:https://img.shields.io/github/license/dlang-supplemental/dubx.svg?style=for-the-badge[License]
+endif::[]
+
 = dubx
 
-Thin meta-CLI for D package workflows. It does **not** reimplement the backends — it routes to them:
+Thin meta-CLI for D package workflows: redub for builds, dub-publish for registry owner ops.
+
+link:https://github.com/dlang-supplemental/dubx/issues[Report Bug] ·
+link:https://github.com/dlang-supplemental/dubx/issues[Request Feature]
+
+== About The Project
+
+It does **not** reimplement the backends — it routes to them:
 
 * **Build / resolve** → https://code.dlang.org/packages/redub[`redub`] (falls back to `dub` if `redub` is missing)
 * **Registry owner ops** → https://github.com/dlang-supplemental/dub-publish[`dub-publish`] (register, login, hooks, logo, …)
 
 Official `dub` has no publish command; `redub` is a separate build system. `dubx` is the small glue so you do not have to remember which binary owns which verb.
 
-== Install
+== Installation
 
 [source,console]
 ----
@@ -71,4 +99,11 @@ See link:CHANGELOG.adoc[CHANGELOG].
 
 == License
 
-Boost Software License 1.0.
+Boost Software License 1.0 — see link:LICENSE[LICENSE].
+
+== Contact
+
+DLang Supplemental — dlang@devcentr.org
+
+* Project: https://github.com/dlang-supplemental/dubx
+* Site: https://dlang-supplemental.github.io
