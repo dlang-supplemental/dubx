@@ -3,7 +3,28 @@ ifndef::env-github[:icons: font]
 :toclevels: 2
 :sectanchors:
 
-[[readme-top]]
+ifdef::env-github[]
+++++
+<a id="readme-top"></a>
+<div align="center">
+<a href="https://github.com/dlang-supplemental/dubx/graphs/contributors"><img src="https://img.shields.io/github/contributors/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Contributors"></a>
+<a href="https://github.com/dlang-supplemental/dubx/network/members"><img src="https://img.shields.io/github/forks/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Forks"></a>
+<a href="https://github.com/dlang-supplemental/dubx/stargazers"><img src="https://img.shields.io/github/stars/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Stars"></a>
+<a href="https://github.com/dlang-supplemental/dubx/issues"><img src="https://img.shields.io/github/issues/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Issues"></a>
+<a href="https://github.com/dlang-supplemental/dubx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/dlang-supplemental/dubx.svg?style=for-the-badge" alt="License"></a>
+<br />
+<h3 align="center">dubx</h3>
+<p align="center">
+Thin meta-CLI for D package workflows: redub for builds, dub-publish for registry owner ops.<br />
+<a href="https://github.com/dlang-supplemental/dubx/issues">Report Bug</a>
+&middot;
+<a href="https://github.com/dlang-supplemental/dubx/issues">Request Feature</a>
+</p>
+</div>
+++++
+endif::[]
+
+ifndef::env-github[]
 image:https://img.shields.io/github/contributors/dlang-supplemental/dubx.svg?style=for-the-badge[Contributors,link=https://github.com/dlang-supplemental/dubx/graphs/contributors]
 image:https://img.shields.io/github/forks/dlang-supplemental/dubx.svg?style=for-the-badge[Forks,link=https://github.com/dlang-supplemental/dubx/network/members]
 image:https://img.shields.io/github/stars/dlang-supplemental/dubx.svg?style=for-the-badge[Stars,link=https://github.com/dlang-supplemental/dubx/stargazers]
@@ -16,6 +37,7 @@ Thin meta-CLI for D package workflows: redub for builds, dub-publish for registr
 
 link:https://github.com/dlang-supplemental/dubx/issues[Report Bug] ·
 link:https://github.com/dlang-supplemental/dubx/issues[Request Feature]
+endif::[]
 
 == About The Project
 
@@ -26,7 +48,9 @@ It does **not** reimplement the backends — it routes to them:
 
 Official `dub` has no publish command; `redub` is a separate build system. `dubx` is the small glue so you do not have to remember which binary owns which verb.
 
-link:#readme-top[back to top]
+++++
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+++++
 
 == Installation
 
@@ -96,7 +120,9 @@ Check discovery:
 dubx which
 ----
 
-link:#readme-top[back to top]
+++++
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+++++
 
 == Usage
 
@@ -121,7 +147,9 @@ dubx dub build
 dubx dub-publish status -n mypkg
 ----
 
-link:#readme-top[back to top]
+++++
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+++++
 
 == Design
 
@@ -137,7 +165,9 @@ See link:CHANGELOG.adoc[CHANGELOG].
 
 Boost Software License 1.0 — see link:LICENSE[LICENSE].
 
-link:#readme-top[back to top]
+++++
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+++++
 
 == Contact
 
@@ -146,4 +176,6 @@ DLang Supplemental — dlang@devcentr.org
 * Project: https://github.com/dlang-supplemental/dubx
 * Site: https://dlang-supplemental.github.io
 
-link:#readme-top[back to top]
+++++
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+++++
