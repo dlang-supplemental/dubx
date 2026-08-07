@@ -1,6 +1,9 @@
 command "dubx" {
     summary "Thin meta-CLI for D package workflows"
     description "Routes verbs to the right backend without reimplementing them: redub (or dub) for builds, dub-publish for registry owner ops, dubproxy for local/private package mirrors."
+    homepage "https://github.com/dlang-supplemental/dubx"
+    docs "https://github.com/dlang-supplemental/dubx#readme"
+    issues "https://github.com/dlang-supplemental/dubx/issues"
 
     section "usage" {
         summary "How to invoke"
