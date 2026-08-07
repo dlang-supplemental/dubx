@@ -1,5 +1,9 @@
 = Changelog
 
+== 0.3.6 (2026-08-07)
+
+* Include embed/ and strimport/ in the repo so release CI string imports work.
+
 == 0.3.5 (2026-08-07)
 
 * prohelp v0.2.3 (UTF-8 console + consistent dim frame/divider layout).

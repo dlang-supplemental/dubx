@@ -5,6 +5,10 @@
 !CHANGELOG.adoc
 !VERSION
 !help.sdl
+!strimport/**
+!strimport/
+!embed/**
+!embed/
 !dub.sdl
 !source/
 !source/**

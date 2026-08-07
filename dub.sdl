@@ -21,5 +21,3 @@ stringImportPaths "embed"
 stringImportPaths "strimport"
 
 libs "user32" platform="windows"
-
-
