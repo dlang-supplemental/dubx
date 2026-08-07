@@ -1,26 +1,33 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Install dubx to a per-user Programs folder and add it to User PATH.
+  Install dubx to a Programs folder and add it to User or Machine PATH.
 
 .DESCRIPTION
   Default install root: %LOCALAPPDATA%\Programs\dlang-supplemental\dubx
-  Copies dubx.exe (and LICENSE if present), updates User PATH, refreshes
+  Copies dubx.exe (and LICENSE if present), updates PATH, refreshes
   the current session Path. Backends (redub, dub-publish) are separate installs.
 
 .PARAMETER Prefix
   Install directory (contains dubx.exe).
 
 .PARAMETER SkipPath
-  Install files only; do not modify User PATH.
+  Install files only; do not modify PATH.
+
+.PARAMETER Scope
+  PATH target: User/Local (default) or System/Machine (requires elevation).
 #>
 [CmdletBinding()]
 param(
     [string] $Prefix = $(Join-Path $env:LOCALAPPDATA "Programs\dlang-supplemental\dubx"),
-    [switch] $SkipPath
+    [switch] $SkipPath,
+    [ValidateSet("User", "Local", "System", "Machine")]
+    [string] $Scope = "User"
 )
 
 $ErrorActionPreference = "Stop"
+
+$pathTarget = if ($Scope -in @("System", "Machine")) { "Machine" } else { "User" }
 
 function Get-SourceExe {
     $here = $PSScriptRoot
@@ -49,26 +56,27 @@ $uninstallBody = @(
     "#Requires -Version 5.1",
     '$ErrorActionPreference = "Stop"',
     '$Prefix = Split-Path -Parent $MyInvocation.MyCommand.Path',
-    '$userPath = [Environment]::GetEnvironmentVariable("Path", "User")',
-    'if ($null -eq $userPath) { $userPath = "" }',
-    '$parts = $userPath -split ";" | Where-Object { $_ -and ($_ -ne $Prefix) }',
-    '[Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")',
+    "`$pathTarget = '$pathTarget'",
+    '$cur = [Environment]::GetEnvironmentVariable("Path", $pathTarget)',
+    'if ($null -eq $cur) { $cur = "" }',
+    '$parts = $cur -split ";" | Where-Object { $_ -and ($_ -ne $Prefix) }',
+    '[Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), $pathTarget)',
     "Remove-Item -LiteralPath `$Prefix -Recurse -Force",
-    'Write-Host "Removed $Prefix and User PATH entry."',
+    'Write-Host "Removed $Prefix and $pathTarget PATH entry."',
     'Write-Host "Open a new shell (or refresh Path) so dubx disappears from PATH."'
 ) -join "`n"
 Set-Content -LiteralPath $uninstall -Value $uninstallBody -Encoding UTF8
 
 if (-not $SkipPath) {
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($null -eq $userPath) { $userPath = "" }
-    $parts = @($userPath -split ";" | Where-Object { $_ })
+    $cur = [Environment]::GetEnvironmentVariable("Path", $pathTarget)
+    if ($null -eq $cur) { $cur = "" }
+    $parts = @($cur -split ";" | Where-Object { $_ })
     if ($parts -notcontains $Prefix) {
         $parts += $Prefix
-        [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
-        Write-Host "Added to User PATH: $Prefix"
+        [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), $pathTarget)
+        Write-Host "Added to $pathTarget PATH: $Prefix"
     } else {
-        Write-Host "User PATH already contains: $Prefix"
+        Write-Host "$pathTarget PATH already contains: $Prefix"
     }
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
         [Environment]::GetEnvironmentVariable("Path", "User")
