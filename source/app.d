@@ -57,8 +57,17 @@ int main(string[] args)
 	case "which":
 		return cmdWhich(rest);
 
-	// Registry owner ops → dub-publish
-	case "publish", "register", "login", "logout", "update", "status",
+	// Opaque registry namespace: dubx publish <anything…> → dub-publish <anything…>
+	// Exception slots: add remaps here only when dubx redesigns a verb.
+	case "publish":
+		return runPublish(rest);
+
+	// Local/private package mirror helper → dubproxy (when installed)
+	case "local":
+		return runLocal(rest);
+
+	// Short aliases (same backend; not a second vocabulary)
+	case "register", "login", "logout", "update", "status",
 		"remove", "logo", "logo-delete", "docs-url", "categories",
 		"hooks", "hooks-disable", "repo", "perms-add", "leave":
 		return runTool("dub-publish", [cmd] ~ rest, ToolKind.registry);
@@ -88,11 +97,30 @@ int main(string[] args)
 	}
 }
 
+/// Forward to dub-publish. Remap only verbs dubx explicitly redesigns.
+int runPublish(string[] rest)
+{
+	if (!rest.length)
+		return runTool("dub-publish", [], ToolKind.registry);
+
+	// Explicit dubx redesigns under `publish` go here, e.g.:
+	//   if (rest[0].toLower == "auth")
+	//       return runTool("dub-publish", ["login"] ~ rest[1 .. $], ToolKind.registry);
+	return runTool("dub-publish", rest, ToolKind.registry);
+}
+
+/// Forward to dubproxy for private/mirror package injection into the local DUB cache.
+int runLocal(string[] rest)
+{
+	return runTool("dubproxy", rest, ToolKind.local);
+}
+
 enum ToolKind
 {
 	build,       /// redub with dub fallback
 	buildForced, /// redub only
 	registry,    /// dub-publish only
+	local,       /// dubproxy (optional PATH tool)
 }
 
 int runBuild(string[] toolArgs)
@@ -120,8 +148,19 @@ int runTool(string name, string[] toolArgs, ToolKind kind)
 			break;
 		case ToolKind.registry:
 			stderr.writeln("dubx: 'dub-publish' not found on PATH");
-			stderr.writeln("  install: https://github.com/dlang-supplemental/dub-publish");
-			stderr.writeln("  then: dub build && put dub-publish on PATH");
+			stderr.writeln("  install: https://github.com/dlang-supplemental/dub-publish/releases");
+			break;
+		case ToolKind.local:
+			stderr.writeln("dubx: 'dubproxy' not found on PATH");
+			stderr.writeln("  dubx local proxies dubproxy for private/mirrored packages in ~/.dub/packages.");
+			stderr.writeln("  Prefer modern alternatives when possible:");
+			stderr.writeln("    - path deps in dub.sdl / dub.json");
+			stderr.writeln("    - git+https://… repository dependencies");
+			stderr.writeln("    - dub add-local / dubx add-local");
+			stderr.writeln("  Install dubproxy (optional):");
+			stderr.writeln("    dub fetch dubproxy && dub build dubproxy --config=cli");
+			stderr.writeln("    then put the binary on PATH");
+			stderr.writeln("  Upstream: https://github.com/symmetryinvestments/dubproxy");
 			break;
 		}
 		return 127;
@@ -142,7 +181,7 @@ int runTool(string name, string[] toolArgs, ToolKind kind)
 
 int cmdWhich(string[] rest)
 {
-	string[] names = rest.length ? rest : ["redub", "dub", "dub-publish"];
+	string[] names = rest.length ? rest : ["redub", "dub", "dub-publish", "dubproxy"];
 	int missing;
 	foreach (n; names)
 	{

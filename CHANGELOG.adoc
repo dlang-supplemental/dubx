@@ -1,5 +1,15 @@
 = Changelog
 
+== 0.3.4 (2026-08-06)
+
+* `dubx local <args…>` proxies optional `dubproxy` (private/mirror packages into `~/.dub/packages`).
+* `dubx which` also reports `dubproxy`; missing-tool hints prefer path/git/`add-local` first.
+
+== 0.3.3 (2026-08-06)
+
+* `dubx publish <args…>` is an opaque passthrough to `dub-publish` (bare `publish` → dub-publish help).
+* Top-level short aliases (`login`, `register`, …) remain; only remaps listed in `runPublish` may diverge later.
+
 == 0.3.2 (2026-08-06)
 
 * Fix `install.ps1` parse error in PATH hint lines.

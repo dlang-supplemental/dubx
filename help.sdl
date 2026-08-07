@@ -1,6 +1,6 @@
 command "dubx" {
     summary "Thin meta-CLI for D package workflows"
-    description "Routes verbs to the right backend without reimplementing them: redub (or dub) for builds, dub-publish for registry owner ops."
+    description "Routes verbs to the right backend without reimplementing them: redub (or dub) for builds, dub-publish for registry owner ops, dubproxy for local/private package mirrors."
 
     section "usage" {
         summary "How to invoke"
@@ -9,7 +9,9 @@ command "dubx" {
         example "Show this help" "dubx"
         example "Progressive help / TUI" "dubx ?"
         example "Build with redub/dub" "dubx build"
-        example "Register via dub-publish" "dubx publish --ignore-fork"
+        example "Register via dub-publish" "dubx publish register --ignore-fork"
+        example "Login via publish namespace" "dubx publish login --user NAME --save-credentials"
+        example "Local/private mirror via dubproxy" "dubx local -h"
         example "See which backends are on PATH" "dubx which"
     }
 
@@ -34,19 +36,29 @@ command "dubx" {
 
     section "registry" {
         summary "Registry verbs -> dub-publish"
-        inline true
-        content "publish register login logout update status hooks logo docs-url categories ..."
+        content "Namespace: dubx publish <dub-publish args…> passes through unchanged (except any verb dubx explicitly remaps). Short aliases (login, register, status, …) still work at the top level. Escape hatch: dubx dub-publish …"
 
-        example "Passthrough" "dubx dub-publish status -n mypkg"
+        example "Passthrough namespace" "dubx publish login --user NAME --save-credentials"
+        example "Register" "dubx publish register --ignore-fork"
+        example "Short alias" "dubx status -n mypkg"
+        example "Escape hatch" "dubx dub-publish status -n mypkg"
+    }
+
+    section "local" {
+        summary "Local/private packages -> dubproxy"
+        content "dubx local <dubproxy args…> proxies dubproxy when installed. Injects git/private packages into ~/.dub/packages so dub/redub resolve them like registry packages. Prefer path deps, git+repository deps, or dub add-local when those suffice — global cache injection is a blunt tool."
+
+        example "Help" "dubx local -h"
+        example "Mirror package list" "dubx local -m -n codedlangorg.json"
     }
 
     section "discovery" {
         summary "Backend discovery"
-        content "dubx which [redub|dub|dub-publish]"
+        content "dubx which [redub|dub|dub-publish|dubproxy]"
     }
 
     section "backends" {
         summary "Install separately on PATH"
-        content "redub: code.dlang.org/packages/redub — dub-publish: github.com/dlang-supplemental/dub-publish/releases"
+        content "redub: github.com/MrcSnm/redub/releases — dub-publish: github.com/dlang-supplemental/dub-publish/releases — dubproxy (optional): github.com/symmetryinvestments/dubproxy"
     }
 }
