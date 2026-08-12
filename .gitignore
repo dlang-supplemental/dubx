@@ -3,6 +3,7 @@
 !LICENSE
 !README.adoc
 !CHANGELOG.adoc
+!AGENTS.md
 !VERSION
 !help.sdl
 !strimport/**
@@ -33,3 +34,6 @@ dub.selections.json
 *.a
 *.log
 MEMORIES.md
+
+# Project agent notes (not machine memories)
+!AGENTS.md
