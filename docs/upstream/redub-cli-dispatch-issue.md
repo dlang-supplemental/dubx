@@ -7,9 +7,9 @@ Any first word that `redub` does not recognise is passed to `runMain` as a packa
 1. **Current major (1.x), next minor release:** a deprecation warning on every implicit use, plus a strict opt-in that makes it an error.
 2. **Next major (2.0):** the error becomes the default. This is a mandatory, full changeover. There is no legacy flag, setting or environment variable that brings the catch-all back.
 
-redub also has **no documented list of the command tokens it accepts**. Please add one, including which `dub` commands redub implements, which it forwards and which it rejects.
+redub also has **no complete, documented list of the command tokens it accepts**. `redub --help` prints a list adapted from dub's that covers only `init`, `run`, `build`, `test`, `describe` and `clean`. Please replace it with a complete list that also says which `dub` commands redub implements, forwards or rejects.
 
-The requirements below cite the OpenShellOrg **CLI Dispatch** standard by rule ID ([standard](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/standard-cli-dispatch.adoc), [rationale](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/standard-cli-dispatch-rationale.adoc), [implementer notes](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/standard-cli-dispatch-implementers.adoc), [conformance](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/certification-cli-dispatch.adoc)).
+The requirements below cite the OpenShellOrg **CLI Dispatch** standard by rule ID ([standard](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-dispatch.adoc), [CLI Styles](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-styles.adoc), [rationale](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-dispatch-rationale.adoc), [implementer notes](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-dispatch-implementers.adoc), [conformance](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/certification-cli-dispatch.adoc)).
 
 ## Current behaviour (checked against `main` @ 7cf2af7, `RedubVersionOnly = "v1.32.1"`)
 
@@ -26,9 +26,11 @@ return runMain(args, runArgs);
 
 Any other first word falls through to `runMain` → `resolveDependencies` (`source/redub/extensions/cli.d`) → `redub.api.resolveDependencies`. There `getPackageFromCli` takes the word as the target package and, via `shouldFetchPackage` / `findPackage(targetPackage, null, packageVersion, "redub-run")`, **fetches, builds and runs it**. Concretely:
 
-- `redub search json` (`search` is a dub command that redub does not implement) tries to fetch and run a package named `search`. This is how `dubx search` came to fetch an unrelated package. See the worked example in the [standard](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/standard-cli-dispatch.adoc).
+- `redub search json` (`search` is a dub command that redub does not implement) tries to fetch and run a package named `search`. This is how `dubx search` came to fetch an unrelated package. See the worked example ("Worked migration: redub") in the [standard](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-dispatch.adoc).
 - A typo such as `redub biuld` does not get a did-you-mean. It becomes a package lookup.
-- Bare `redub` runs `runMain` silently (CD-6).
+- `redub help` is not a command either. It is looked up as a package named `help`. Only `redub --help` works, because it starts with `-` and reaches getopt's `helpWanted`.
+- Bare `redub` runs `runMain` silently. The help text says that redub defaults to `run` when the command is omitted, but the run itself does not announce the default (CD-6).
+
 
 ## Requested change
 
@@ -66,18 +68,21 @@ $ echo $?
 - Bare `redub` prints help (CD-5). If you want to keep a default, it must be documented and announce itself, e.g. `no command given; running default: run` (CD-6).
 - The 2.0 release notes list every implicit form that is now an error, with its replacement (CD-15).
 
+### One declared style, per CS-9 (and CS-1, CS-3, CS-4)
+
+redub should declare one style for its whole command surface and keep to it ([CS-9](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/standard-cli-styles.adoc)). Today the top level mixes them: known tokens are taken literally, and anything else is resolved loosely as a package to fetch and run. CS-9 rules out that mix. CS-3 also says no style may make top-level dispatch loose, and CS-4 says no style may silently fetch, build or run. The natural declaration is strict, which is the default under CS-1 and what this issue asks for. If redub ever wants resolver-style behaviour, CS-9 requires it to ship as a separate tool.
+
 ### Documented command-token list, per CD-4, CD-16, CD-17
 
-- `redub --help` (and `redub help`) lists every token the dispatcher accepts, including `watch` when built with `RedubWatcher` and any aliases and default.
+- `redub --help`, and a real `redub help` command, list every token the dispatcher accepts, including `watch` when built with `RedubWatcher` and any aliases and default.
 - The README or docs carry a table of every `dub` command showing whether redub **implements** it, **forwards** it (and to what), or **rejects** it. The table must be kept in step with the dub versions redub supports (CD-17).
 - Unknown flags, extra positionals and missing arguments are usage errors with exit `2` (CD-7, CD-8).
 
 ## Certification
 
-When the 1.x warning release ships, redub can self-declare **Migrating** conformance. After 2.0 ships with strict as the default, it can self-declare **Strict** conformance. The levels and self-test are in [certification-cli-dispatch.adoc](https://github.com/openshellorg/docs/blob/6480593/docs/modules/ROOT/pages/certification-cli-dispatch.adoc). I'd like to invite you to run the self-test and certify.
+When the 1.x warning release ships, redub can self-declare **Migrating** conformance. After 2.0 ships with strict as the default, it can self-declare **Strict** conformance. The levels and self-test are in [certification-cli-dispatch.adoc](https://github.com/openshellorg/docs/blob/2291a64/docs/modules/ROOT/pages/certification-cli-dispatch.adoc). I'd like to invite you to run the self-test and certify.
 
 ## Related
 
-- #26: Help CLI flag is missing (closed). `--help` exists now, but there is no command-token list (CD-16).
+- #26: Help CLI flag is missing (closed). `--help` exists now, but its command list is incomplete and `redub help` is still a package lookup (CD-16).
 - #31 / #29: `redub -v test` / `redub -q test` (closed). Earlier cases of tokens in an unexpected position reaching the wrong handler.
-- dlang/dub: companion issue for the same change in dub (link to be added after filing)

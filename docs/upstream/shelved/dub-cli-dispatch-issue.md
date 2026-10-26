@@ -1,3 +1,5 @@
+Shelved: Ryan chose not to file against dub; dub only has narrow implicit forms.
+
 # Make unknown command tokens an error: deprecate dub's implicit dispatch now, error by default in dub 2.0
 
 ## Summary
