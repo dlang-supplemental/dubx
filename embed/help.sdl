@@ -40,7 +40,7 @@ command "dubx" {
 
     section "search" {
         summary "Grouped registry search"
-        content "dubx search <query> asks code.dlang.org and GitHub/GitLab, then groups hits: Active, Slow but alive, Finished or maintenance-only, Quiet, Declared deprecated or unmaintained, Repo gone or archived, Wrapper or subpackage. Each row has a short reason (dates, repo 404/archived). A maintainer-declared x:status in dub.sdl/dub.json beats the heuristics. Set GH_TOKEN for more GitHub requests. Exit: 0 ok, 2 usage, 3 network."
+        content "dubx search <query> asks code.dlang.org and GitHub/GitLab, then groups hits: Active, Slow but alive, Finished or maintenance-only, Quiet, Declared deprecated or unmaintained, Repo gone or archived, Wrapper or subpackage. Each row has a short reason (dates, repo 404/archived). A maintainer-declared x:status in dub.sdl/dub.json beats the heuristics. Shows the package's own CI result (GitHub checks/status, GitLab pipelines) for the latest release tag, 'used by N of these results' (dependents among the results only; the registry has no reverse-dependency API), and keeps a declared status for 30 days after a repo starts answering 404. Set GH_TOKEN for more GitHub requests. Exit: 0 ok, 2 usage, 3 network."
 
         example "Grouped search" "dubx search yaml"
         example "More facts + log" "dubx search yaml --verbose"

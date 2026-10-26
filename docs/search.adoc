@@ -34,7 +34,8 @@ Results go to stdout. Warnings (for example a GitHub rate limit) and the `log:` 
 * GitHub `GET /repos/<owner>/<repo>` – 404 (repo gone), `archived`, `pushed_at`, stars, open issues. A redirect to another owner/name counts as "moved", not gone.
 * GitHub `GET /repos/<owner>/<repo>/issues?state=all&per_page=10` – only for packages whose newest activity is older than `activeDays` (saves API quota).
 * `raw.githubusercontent.com/<owner>/<repo>/HEAD/dub.sdl` (then `dub.json`) – a maintainer-declared `x:status`. dub drops unknown recipe keys, so the registry never stores this; raw file fetches do not count against the API limit.
-* GitLab `GET /projects/<owner%2Frepo>` – archived, `last_activity_at`, stars. Bitbucket repos are not checked.
+* GitLab `GET /projects/<owner%2Frepo>` – archived, `last_activity_at`, stars, default branch. Bitbucket repos are not checked.
+* Build status reported by the package's own CI (top-level packages whose repo is reachable): GitHub `GET /repos/<o>/<r>/commits/<ref>/check-runs`, then `/commits/<ref>/status` (combined commit status) when there are no check runs; GitLab `GET /projects/<id>/pipelines?ref=<ref>&per_page=1`. `<ref>` is tried in order: `v<latest version>`, `<latest version>`, then the default branch. If a ref exists but has no CI results, dubx stops there instead of reporting a different commit.
 
 `GH_TOKEN` (or `GITHUB_TOKEN`) is sent when set; it travels to `curl` on stdin, not on the command line.
 Without a token GitHub allows 60 requests per hour. When the limit is hit dubx stops asking GitHub, judges the remaining packages from registry dates only, and says so on stderr.
@@ -45,6 +46,8 @@ Responses (200 and 404 only) are cached for 60 minutes:
 * Windows: `%LOCALAPPDATA%\dubx\cache\http`
 * macOS: `~/Library/Caches/dubx/http`
 * Linux: `$XDG_CACHE_HOME/dubx/http` (default `~/.cache/dubx/http`)
+
+Next to the `http` folder, `repo-state.json` remembers, per repository, when dubx first saw it answer 404/451 (`firstGone`) and the last `x:status` read while it was reachable (`declaredStatus`). The entry is cleared when the repo answers again. It never expires; delete the file to reset.
 
 Each run writes a JSON Lines log (`section`: `search`, `network`, `classify`) and keeps the newest 20:
 
@@ -72,12 +75,13 @@ All thresholds live in one place: `struct Thresholds` in `source/search_heuristi
 |`issueSample` |10 |Recent issues (PRs excluded) sampled for responsiveness.
 |`answeredPercent` |50 |Share of sampled issues closed or commented on to count as "answers issues".
 |`minIssues` |3 |Fewer sampled issues than this: no responsiveness verdict.
+|`goneGraceDays` |30 |How long a repo must keep answering 404/451 (counted from the first time dubx saw it) before it overrides a declared `x:status`.
 |`wrapperDescriptionPattern` |`\b(bindings?\|wrappers?\|wraps\|port of\|interface to\|binding for)\b` |Description words that mark a wrapper.
 |===
 
 Rules, first match wins:
 
-. *Repo gone or archived* (`gone`) – repository host says 404/451, or the repo is archived. Hard facts.
+. *Repo gone or archived* (`gone`) – the repo is archived, or the host says 404/451. A 404 with no declared status counts at once. A package with a declared `x:status` (the current recipe, or the one remembered in `repo-state.json`) keeps its declared bucket for `goneGraceDays`, with `repo unreachable since <date>` in the reason; after that the 404 wins. Repos get renamed, made private for a day, or restored.
 . *Declared status* – the maintainer's `x:status` beats every heuristic and is shown first in the reason:
 ** `complete`, `maintenance-only` → *Finished or maintenance-only* (`finished`)
 ** `deprecated`, `unmaintained` → *Declared deprecated or unmaintained* (`unmaintained`)
@@ -85,18 +89,27 @@ Rules, first match wins:
 . *Wrapper or subpackage* (`wrapper`) – name contains `:`; or a dependency of the newest release is another package in the same result set (own subpackages ignored); or the description matches `wrapperDescriptionPattern`.
 . *Active* (`active`) – newest activity ≤ `activeDays`.
 . *Slow but alive* (`slow`) – newest activity ≤ `quietDays`.
-. *Finished or maintenance-only* (`finished`) – older than that, but it answers issues and is not known to fail to build.
+. *Finished or maintenance-only* (`finished`) – older than that, but it answers issues *or* its own CI passes, and neither its CI fails nor it is known not to build.
 . *Quiet* (`quiet`) – older than that, nothing else known. A fact, not a verdict.
 . *Unknown* (`unknown`) – no registry info at all.
 
 "Newest activity" is the latest of: newest tagged release date, newest `~branch` version date in the registry, and the repo's `pushed_at` / `last_activity_at`.
 
+=== Build status (reported by the package's own CI)
+
+The reason shows `CI passing on tag v2.2.0 (2025-10)` or `CI failing on branch master (2021-04)`. The date matters: a green result from years ago says the package built with the compilers of that time, not today's. `--verbose` adds the source (`github-checks`, `github-status`, `gitlab-pipeline`) and a link. dubx does not run builds; the result is whatever the maintainer's CI reported, so it is evidence, not proof.
+
+* check runs: any `failure`, `timed_out`, `action_required` or `startup_failure` → failing; any run not completed → pending; otherwise passing.
+* combined status: `success` → passing, `pending` → pending, `failure`/`error` → failing; zero statuses → unknown.
+* GitLab: `success`, `failed`, running-like states → pending; `canceled`/`skipped`/`manual` → unknown.
+
+=== Dependents
+
+`used by N of these results` counts only packages *in the same search results* whose newest release depends on this one (own subpackages excluded). code.dlang.org has no reverse-dependency API, and computing a registry-wide count would mean fetching every package, so dubx does not. The human output prints a footnote, and the JSON says `"dependentsScope": "search-results"`.
+
 === Signals kept as hooks
 
-These are in `Facts` and the JSON output but have no cheap source yet, so they stay unknown (`null` / `-1`):
-
-* `buildsWithCurrent` – does it still build with current DMD/LDC? The strongest liveness signal. Neither the registry nor GitHub exposes it today; a registry-side build bot would fill it (see the upstream proposal).
-* `dependents` – how many packages depend on it and how recent their releases are. The registry has no reverse-dependency endpoint.
+* `buildsWithCurrent` – does it still build with *current* DMD/LDC? Only a registry-side build (see the upstream proposal) can say. Stays `null`.
 
 == Example
 
@@ -105,7 +118,8 @@ These are in `Facts` and the JSON output but have no cheap source yet, so they s
 24 package(s) for 'yaml'
 
 Active (5)
-  dyaml                      0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01
+  dyaml                      0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01, used by 4 of these results
+  mir-ion                    2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on tag v2.3.5 (2025-11)
   ...
 
 Quiet (3)
@@ -113,9 +127,28 @@ Quiet (3)
   ...
 
 Repo gone or archived (3)
-  yaml-d                     0.0.1        single release 0.0.1 (2017-05), repo 404
+  yaml-d                     0.0.1        single release 0.0.1 (2017-05), repo 404 since 2026-10-26
   mir-yaml                   1.0.0        single release 1.0.0 (2021-07), repo archived
   ...
+----
+
+=== JSON fields added in 0.5.0
+
+* `dependentsScope`: always `"search-results"`.
+* per package `ci`: `{state: passing|failing|pending|unknown, source, ref, date, url, reportedBy: "package CI"}`.
+* per package `dependents`: `{scope: "search-results", count, names}` (was a `-1` hook).
+* per package `repoGoneSince`: first date dubx saw the repo answer 404/451, or `null`.
+* `thresholds.goneGraceDays`.
+
+== Commands vs. package names
+
+`dubx search` (and every other built-in) always runs dubx's own code. dubx never treats an unknown first word as a package to fetch and run (older releases forwarded unknown words to redub, which did exactly that: `dubx search yaml` on 0.3.x fetched a package called `search`). An unknown word prints a hint and exits 2:
+
+[source]
+----
+dubx: unknown command 'serch'. Did you mean 'dubx search'?
+  dubx does not fetch or run a package from a bare name.
+  To run a registry package named 'serch': dubx dub run serch
 ----
 
 == Declaring a status in your own package
