@@ -39,17 +39,18 @@ Shared definitions (same as dubx; thresholds in one place):
 | `issueSample` | 10 | recent issues (PRs excluded) sampled |
 | `answeredPercent` | 50 | share closed or commented to count as "answers issues" |
 | `minIssues` | 3 | fewer sampled issues → no responsiveness verdict |
+| `goneGraceDays` | 30 | sustained 404/451 needed before it overrides a declared status |
 | `wrapperDescriptionPattern` | `\b(bindings?\|wrappers?\|wraps\|port of\|interface to\|binding for)\b` | description marks a wrapper |
 
 Rules, first match wins:
 
-1. **Repo gone or archived** – host returns 404/451, or repo is archived.
+1. **Repo gone or archived** – repo is archived, or the host returns 404/451. With no declared status a 404 counts at once. With a declared status the 404 must be *sustained*: repeated checks (the 24 h stats refresh) keep failing for `goneGraceDays` (default 30, configurable) since the first failure. Until then the package keeps its declared bucket and shows *repo unreachable since <date>*; after that the 404 overrides the declaration. Repos get renamed, briefly made private, or restored, so one failed fetch is not enough to bury a package whose maintainer said it is finished.
 2. **Declared status** (see section 2) – always beats the heuristics and is shown first:
    `complete`, `maintenance-only` → **Finished or maintenance-only**; `deprecated`, `unmaintained` → **Declared deprecated or unmaintained**; `experimental`, `alpha`, `beta`, `stable` → **Active** (with the declared label as a badge).
 3. **Wrapper or subpackage** – name contains `:`; or the newest release depends on another package in the same result set (own subpackages ignored); or the description matches the pattern.
 4. **Active** – newest activity ≤ `activeDays`.
 5. **Slow but alive** – newest activity ≤ `quietDays`.
-6. **Finished** – older, but answers issues and does not fail to build with current compilers.
+6. **Finished** – older, but answers issues *or* its CI passes (see Build status), and no build is known to fail.
 7. **Quiet** – older, nothing else known. A fact, not a verdict.
 
 "Newest activity" = latest of: newest tagged release date, newest `~branch` version date, repo push date.
@@ -92,6 +93,74 @@ x:status "complete"
 
 Badge: show the declared status as a badge on the search row and on the package page, and offer `https://code.dlang.org/packages/<name>/status.svg` for READMEs.
 
+## Dependency graph
+
+The registry should compute and show, for every package **and every version**:
+
+- **Dependencies**, direct and transitive (the resolved tree, depth-limited for display).
+- **Dependents** ("used by"), direct and transitive, with the version ranges they ask for.
+
+### The data is already there
+
+`getVersionInfo()` (registry.d ~line 738) stores each version's `recipe.toJson()` as `DbPackageVersion.info`, so `versions.info.dependencies` (and `configurations[].dependencies`, `subPackages[]`) is in Mongo for every version of every package. Dependencies are a read of that field. **Dependents are the reverse index of the same field**: no new data source, only an aggregation.
+
+### Prior art: registry.antora-supplemental.org
+
+[registry.antora-supplemental.org](https://registry.antora-supplemental.org) (source: `antora-supplemental/antora-extensions-registry`, SolidStart + Drizzle/Turso) already shows a dependency tree and a "Used by" list for each Antora extension:
+
+- **Data model.** Each module records typed edges: `requires`, `recommends`, and `bundles` (a bundle package lists its members). Packages declare richer relations in `package.json` under `antoraRegistry` (`requires`, `worksWith`, `conflictsWith`, `provides`/`uses` contracts). Compatibility links are computed at catalog sync, stored in a `catalog_compat` table and the catalog snapshot, and shown on *both* packages with a confidence order: declared conflict > platform mismatch > guaranteed > declared/curated > likely (inferred) > alternative.
+- **Engine** (`src/lib/extension-deps.ts`). `buildDependencyTree(root, all, maxDepth = 4)` walks requires, recommends and bundle members. It is cycle-safe (a node already on the current branch is shown once and marked `cycle`), dedupes children, and shows unresolved ids as "(not listed)" or, when it has an external URL, "(not in registry)". `resolveModuleId` prefers a module from the same repository when a name is ambiguous. `dependents(target, all)` returns incoming edges with their relation (requires / recommends / bundled in) and a `mutual` flag for two-package cycles.
+- **UI.** The package page has a "Dependency tree" card (nested list, version per node, relation badge: requires = warning colour, bundles = primary, recommends = muted; "No dependencies." when empty) and a "Used by" list with the same badges plus "mutual".
+- **API.** `/api/extensions/catalog` returns the whole catalog with each module's requires/recommends (cached 300 s); clients build the graph themselves. There is no dedicated dependents endpoint.
+
+### What to copy, what to change for dub
+
+Keep: typed edges (for dub: required, optional, default-optional, per-configuration, subpackage), a depth limit on displayed trees, explicit cycle marks, visible "not in registry" nodes (path/repository dependencies), the mutual flag, and per-relation badges.
+
+Change:
+
+1. **Per version, not latest-only.** The antora registry keeps edges for the newest release only. dub users pin versions, and "who still depends on 1.x" is the question that matters before a breaking release. Store edges per `(package, version)`; show the newest by default with a version picker.
+2. **Precompute the reverse index.** The antora registry computes dependents at read time over a few hundred entries. dub has ~2.5k packages and tens of thousands of versions, so build a `dependents` collection (`{target, targetRange, source, sourceVersion, relation, configuration}`) in the existing `updatePackages()` cycle, updated incrementally when a version is added or removed. Transitive dependents are a bounded BFS over that index (cache the counts).
+3. **Resolve ranges.** A dependent edge carries a version range, so the UI can say "used by 37 (12 on a range that includes 2.x)". Transitive *dependencies* should be resolved the way dub would (newest matching version) and labelled as such, because a consumer's real lockfile may differ.
+4. **Expose it in the API.**
+   – `GET /api/packages/<name>/<version>/dependencies?transitive=1&depth=4`: tree with resolved versions, relation, `cycle`, `notInRegistry`.
+   – `GET /api/packages/<name>/dependents?version=<v>&transitive=0|1`: source package, source version, range, relation; plus `count` and `countRecent` (dependents whose newest release is within `activeDays`).
+   – `dependents` / `dependentsRecent` in `/api/packages/<name>/stats`, so search can use them cheaply.
+5. **Feed the heuristics.** "Used by N recently released packages" is a liveness signal independent of the package's own release cadence: a finished library that 40 active packages depend on is not dead.
+
+Where in dub-registry: a `DbController.updateDependents(packageId)` next to `searchPackages` (dbcontroller.d ~line 395), called from `updatePackages()` (registry.d ~line 493) after `getVersionInfo`; new routes in `api.d`; "Dependencies" and "Used by" cards in `views/view_package.dt`.
+
+dubx can only count dependents **among one search's results** (`used by N of these results`), because the public API has no reverse lookup and building one client-side means downloading every package. That limit is the argument for doing it in the registry.
+
+## Build status
+
+"Still builds" is the strongest liveness signal and the one the registry cannot see today. Roll it out in order of cost.
+
+### (a) Read the CI the repo already has (cheap, now)
+
+During the 24 h stats refresh, ask the repo host what CI reported for the newest release tag (`v<ver>`, then `<ver>`), falling back to the default branch head:
+
+- GitHub: `GET /repos/{o}/{r}/commits/{ref}/check-runs` (GitHub Actions and apps), then `GET .../commits/{ref}/status` (legacy combined status) when there are no check runs.
+- GitLab: `GET /projects/:id/pipelines?ref={ref}&per_page=1`.
+- Gitea/Forgejo: `GET /repos/{o}/{r}/commits/{ref}/status` (combined status, same shape as GitHub's).
+
+Store `ciState` (passing/failing/pending/unknown), `ciRef`, `ciDate`, `ciUrl` in `DbPackageStats`, and show a badge linking to the run, labelled **"reported by the package's own CI"**. That is one or two extra requests per package per day, on host APIs the registry already calls (`RepositoryInfo` in repository.d ~line 98; github.d ~line 137, gitlab.d ~line 144, gitea.d ~line 146). dubx 0.5.0 implements this client-side.
+
+### (b) Opt-in shared CI (cheap for the registry, run by maintainers)
+
+Publish a reusable GitHub Actions workflow (e.g. `dlang/dub-registry/.github/workflows/package-check.yml`) and a GitLab CI template that build and test against a fixed matrix (latest DMD, latest LDC, oldest supported frontend) on push, on tag and weekly. They report to the registry through the existing repository webhook (or a signed status file the registry fetches), including the compiler versions used. Maintainers opt in with a few lines of YAML, and the registry gets *uniform* results ("builds with DMD 2.111 and LDC 1.42 as of <date>") instead of whatever each project's CI happens to check.
+
+### (c) Registry-run builds (expensive, limited)
+
+Build in a registry-owned sandbox only for a bounded set: the top N by downloads or by dependents (say 200), plus packages whose (a)/(b) result is stale. Rough cost: a median `dub build` + `dub test` takes 1-3 minutes; 200 packages × 2 compilers × weekly is about 400-1200 build-minutes a week. That fits the free Actions quota of a public `dub-registry-builds` repo, or one small VM. Builds run with no network after `dub fetch`, no secrets, CPU/memory/time limits, and only for released versions (never arbitrary branches). Packages that need system libraries are reported as "needs system deps", not as failing.
+
+### Trust, abuse and staleness
+
+- **Label the source.** (a) is self-reported: maintainers control their own CI and can make it green. (b) is self-run but uses the registry's workflow, so the matrix is known. (c) is verified. Show which one produced the badge, and rank verified above self-reported in any scoring.
+- **CI never demotes on its own.** No CI is *unknown*, not failing. A failing self-reported run may block *Finished* but never marks a package dead.
+- **Staleness.** Always show the date and ref: "passing on v0.10.0, 2024-06" is a different claim from "passing on master, today". An old green result describes old compilers. After `quietDays`, or after a new DMD/LDC frontend release, show it as *last known green* and stop counting it as evidence for *Finished*. Prefer the newest release tag; fall back to the branch only when the tag has no CI, and say so.
+- **Abuse.** For (b), webhook reports must be signed per package (the existing webhook secret) and must point at a run URL the registry can fetch back; ignore reports for refs that do not exist. For (c), rate-limit rebuild requests and never build on unauthenticated triggers.
+
 ## Where to change dub-registry
 
 All paths at `a7671f8`.
@@ -101,7 +170,7 @@ All paths at `a7671f8`.
 - `source/dubregistry/dbcontroller.d` – `struct DbPackageStats` (~line 752) gains `@optional` fields, e.g. `repoState` (`ok`/`gone`/`archived`), `lastPush`, `issuesSampled`, `issuesAnswered`, `dependents`, `buildsWithCurrent` (tri-state). `struct DbRepoStatsT` (~line 772) could hold `archived`/`pushedAt` instead.
 - `source/dubregistry/repositories/repository.d` – `struct RepositoryInfo` (~line 98) gains `bool archived; SysTime pushedAt;`.
 - `source/dubregistry/repositories/github.d` – `GithubRepository.getInfo()` (~line 137) already reads the repo JSON (`fork`, `stargazers_count`, `open_issues_count`); also read `archived` and `pushed_at`. Same for `gitlab.d` (`archived`, `last_activity_at`) and `gitea.d`; `bitbucket.d` can leave them unset.
-- `source/dubregistry/registry.d` – `DubRegistry.updatePackageStats()` (~line 170) already catches `FileNotFoundException` as "repo no longer exists" and zero-scores the package (#221). Record `repoState = gone` there instead of only dropping the score; copy `archived`/`pushedAt` from `getRepositoryInfo()`. Stats are cached 24 h by `getPackageStats()`, which is the right cadence.
+- `source/dubregistry/registry.d` – `DubRegistry.updatePackageStats()` (~line 172) already catches `FileNotFoundException` (~line 182) as "repo no longer exists" and zero-scores the package (#221). Record `repoState = gone` and keep the first failure date (`repoGoneSince`, cleared on the next success) there instead of only dropping the score; copy `archived`/`pushedAt` from `getRepositoryInfo()`. Stats are cached 24 h by `getPackageStats()`, which is the right cadence.
 - Dependents: a new aggregation next to `DbController.searchPackages` over `versions.info.dependencies`, run from the existing `updatePackages()` cycle.
 
 **Declared status**
@@ -125,18 +194,22 @@ All paths at `a7671f8`.
 2. Add `status.d` + grouped search page behind a `?grouped=1` query flag; collect feedback.
 3. Make grouping the default; keep a "flat list" link.
 4. Land `x:status` in dub; add badge.
-5. Build-check job feeding `buildsWithCurrent`.
+5. Read existing CI status (Build status (a)); store `repoGoneSince` and apply the 30-day rule.
+6. Dependents reverse index + API endpoints + package-page cards (Dependency graph).
+7. Opt-in shared workflow (b), then a limited registry build job (c) feeding `buildsWithCurrent`.
 
 ## Open questions
 
 1. Field name: `x:status` (namespaced, clearly an extension) or a first-class `status`? Namespaced keys need a dub change either way, because dub drops unknown keys today.
-2. Should a declared `stable` with a 404 repo still show as gone? This draft says yes: a missing repo is a fact that beats any declaration.
-3. Should `deprecated` carry a successor (`x:status "deprecated" successor="dyaml"`)?
-4. Who runs the build check, how often, and against which compiler versions (latest DMD + latest LDC only)? What counts as "builds" for packages that need system libraries?
-5. Is "answers issues" fair to projects that track issues elsewhere (GitLab, mailing list)? Should it only ever raise a package (Quiet → Finished), never lower one? (This draft: only raise.)
-6. Wrapper detection by "depends on another hit" also catches frameworks that merely use the library (e.g. `uim-framework` → `dyaml`). Keep it, restrict it to small packages, or let maintainers declare `x:kind "binding"`?
-7. Thresholds: are 12 months / 3 years right for D's release culture? They are in one struct, so they are easy to tune.
-8. Should packages whose repo has been 404 for N months be hidden from default search entirely?
+2. Should `deprecated` carry a successor (`x:status "deprecated" successor="dyaml"`)?
+3. For Build status (c): which compiler versions (latest DMD + latest LDC only, or also the oldest supported frontend)? How should packages that need system libraries be reported?
+4. Is "answers issues" fair to projects that track issues elsewhere (GitLab, mailing list)? Should it only ever raise a package (Quiet → Finished), never lower one? (This draft: only raise.)
+5. Wrapper detection by "depends on another hit" also catches frameworks that merely use the library (e.g. `uim-framework` → `dyaml`). Keep it, restrict it to small packages, or let maintainers declare `x:kind "binding"`?
+6. Thresholds: are 12 months / 3 years right for D's release culture? They are in one struct, so they are easy to tune.
+7. Should packages past the 30-day 404 rule be hidden from default search entirely, or only sorted last?
+8. Dependency graph: should transitive dependents count optional dependencies, and should dependents that are themselves *Repo gone* be excluded from counts?
+
+Resolved: a declared status with a 404 repo keeps its bucket, with a *repo unreachable since <date>* warning, until the 404 has been sustained for `goneGraceDays` (30, configurable) over repeated checks; then the repo counts as gone. A 404 without a declared status counts at once.
 
 ## Reference implementation
 
@@ -144,11 +217,12 @@ All paths at `a7671f8`.
 
 ```
 Active (5)
-  dyaml          0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01
+  dyaml          0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01, used by 4 of these results
+  mir-ion        2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on tag v2.3.5 (2025-11)
 Quiet (3)
   uniconf        0.2.2        last release 0.2.2 (2020-04), pushed 2021-04
 Repo gone or archived (3)
-  yaml-d         0.0.1        single release 0.0.1 (2017-05), repo 404
+  yaml-d         0.0.1        single release 0.0.1 (2017-05), repo 404 since 2026-10-26
   mir-yaml       1.0.0        single release 1.0.0 (2021-07), repo archived
 Wrapper or subpackage (13)
   dyaml:yaml_gen 0.10.0       subpackage of dyaml
