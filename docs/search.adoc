@@ -35,7 +35,7 @@ Results go to stdout. Warnings (for example a GitHub rate limit) and the `log:` 
 * GitHub `GET /repos/<owner>/<repo>/issues?state=all&per_page=10` – only for packages whose newest activity is older than `activeDays` (saves API quota).
 * `raw.githubusercontent.com/<owner>/<repo>/HEAD/dub.sdl` (then `dub.json`) – a maintainer-declared `x:status`. dub drops unknown recipe keys, so the registry never stores this; raw file fetches do not count against the API limit.
 * GitLab `GET /projects/<owner%2Frepo>` – archived, `last_activity_at`, stars, default branch. Bitbucket repos are not checked.
-* Build status reported by the package's own CI (top-level packages whose repo is reachable): GitHub `GET /repos/<o>/<r>/commits/<ref>/check-runs`, then `/commits/<ref>/status` (combined commit status) when there are no check runs; GitLab `GET /projects/<id>/pipelines?ref=<ref>&per_page=1`. `<ref>` is tried in order: `v<latest version>`, `<latest version>`, then the default branch. If a ref exists but has no CI results, dubx stops there instead of reporting a different commit.
+* Build status reported by the package's own CI, *for the exact release commit only* (top-level packages whose repo is reachable). The latest registry version's tag (`v<version>`, then `<version>`) is resolved to a commit SHA: GitHub `GET /repos/<o>/<r>/git/ref/tags/<tag>`, peeling annotated tags through `/git/tags/<sha>`; GitLab `GET /projects/<id>/repository/tags/<tag>`. Then GitHub check runs *and* combined status for that SHA (`/commits/<sha>/check-runs`, `/commits/<sha>/status`), or GitLab `/pipelines?sha=<sha>&per_page=1`. There is no branch fallback. A run from a push to `main` counts only if it ran on that same SHA.
 
 `GH_TOKEN` (or `GITHUB_TOKEN`) is sent when set; it travels to `curl` on stdin, not on the command line.
 Without a token GitHub allows 60 requests per hour. When the limit is hit dubx stops asking GitHub, judges the remaining packages from registry dates only, and says so on stderr.
@@ -97,7 +97,11 @@ Rules, first match wins:
 
 === Build status (reported by the package's own CI)
 
-The reason shows `CI passing on tag v2.2.0 (2025-10)` or `CI failing on branch master (2021-04)`. The date matters: a green result from years ago says the package built with the compilers of that time, not today's. `--verbose` adds the source (`github-checks`, `github-status`, `gitlab-pipeline`) and a link. dubx does not run builds; the result is whatever the maintainer's CI reported, so it is evidence, not proof.
+The reason shows `CI passing on v2.2.0 (2025-10)`. `--verbose` adds the source (`github-checks`, `github-status`, `gitlab-pipeline`, joined with `+` when both agree), the tag with the short SHA (`v2.2.0 @ 86e74d6`) and a link. When check runs and commit status disagree, failing beats pending beats passing. The date matters: a green result from years ago says the package built with the compilers of that time. dubx does not run builds; the result is whatever the maintainer's CI reported, so it is evidence, not proof.
+
+With no release tag, or no CI results on the tagged commit, there is no status: `--verbose` prints `CI: none for release (<reason>)` and the default output only counts such packages in a footer. Either way dubx links to link:ci-status-for-releases.adoc[Link your CI to your release] (`ciHelpUrl`). It never counts as passing or failing.
+
+The link is an OSC 8 terminal hyperlink when stdout is a terminal known to render it (Windows Terminal, VS Code, iTerm2, WezTerm, kitty, foot, Ghostty, Konsole, VTE ≥ 0.50); otherwise, including when piped, dubx prints the plain URL. `DUBX_NO_HYPERLINKS=1` forces the plain URL.
 
 * check runs: any `failure`, `timed_out`, `action_required` or `startup_failure` → failing; any run not completed → pending; otherwise passing.
 * combined status: `success` → passing, `pending` → pending, `failure`/`error` → failing; zero statuses → unknown.
@@ -119,7 +123,7 @@ The reason shows `CI passing on tag v2.2.0 (2025-10)` or `CI failing on branch m
 
 Active (5)
   dyaml                      0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01, used by 4 of these results
-  mir-ion                    2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on tag v2.3.5 (2025-11)
+  mir-ion                    2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on v2.3.5 (2025-11)
   ...
 
 Quiet (3)
@@ -135,7 +139,7 @@ Repo gone or archived (3)
 === JSON fields added in 0.5.0
 
 * `dependentsScope`: always `"search-results"`.
-* per package `ci`: `{state: passing|failing|pending|unknown, source, ref, date, url, reportedBy: "package CI"}`.
+* per package `ci`: `{state: passing|failing|pending, source, tag, sha, date, url, reportedBy: "package CI"}`, or `null` when there is no result for the release commit; then `ciReason` says why and `ciHelpUrl` links the how-to.
 * per package `dependents`: `{scope: "search-results", count, names}` (was a `-1` hook).
 * per package `repoGoneSince`: first date dubx saw the repo answer 404/451, or `null`.
 * `thresholds.goneGraceDays`.

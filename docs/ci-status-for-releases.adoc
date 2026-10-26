@@ -1,0 +1,103 @@
+= Link your CI to your release
+:toc: macro
+
+`dubx search` (and, if the upstream proposal lands, code.dlang.org) shows a CI badge for a package only when the result belongs to *exactly the code the registry serves*: the commit your latest release tag points at.
+If your package shows `CI: none for release`, this page explains why and how to fix it.
+
+toc::[]
+
+== Why the status is unknown
+
+dubx takes the latest version the registry lists (say `1.4.0`), looks for the tag `v1.4.0`, then `1.4.0`, and resolves it to a commit SHA.
+It then asks the host for CI results *on that SHA*:
+
+* GitHub: check runs (`/commits/<sha>/check-runs`, GitHub Actions and apps) and the combined commit status (`/commits/<sha>/status`, older CI services).
+* GitLab: the newest pipeline for that SHA (`/pipelines?sha=<sha>`).
+
+You get `none for release` when:
+
+. *There is no tag* named `v1.4.0` or `1.4.0` (for example the registry version came from a branch, or the tag was deleted).
+. *No CI ran on the tagged commit.* Typical cause: CI ran on `main`, then you committed a version bump or changelog and tagged *that* commit without pushing it to a branch CI watches, or your workflow only runs on `pull_request`.
+
+dubx never borrows a result from another commit (such as `main` HEAD), because that would describe code users do not get. "No result" is never counted as failing.
+
+== Fix on GitHub
+
+=== Option 1: run CI on tag pushes
+
+Add a tag trigger to your workflow, e.g. `.github/workflows/ci.yml`:
+
+[source,yaml]
+----
+name: CI
+on:
+  push:
+    branches: [main]
+    tags: ['v*']        # runs on the exact commit you release
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        dc: [dmd-latest, ldc-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.dc }}
+      - run: dub test
+      - run: dub build
+----
+
+Use `tags: ['*']` if your tags have no `v` prefix. The next tag you push gets a result; for an existing release you can re-run by deleting and re-pushing the tag only if nobody depends on it yet – otherwise just tag the next release.
+
+=== Option 2: tag a commit CI already tested
+
+A run triggered by a push to `main` counts, as long as it ran on the same commit: dubx matches by SHA, not by branch. So:
+
+[source,shell]
+----
+git push origin main          # CI runs on this commit
+# wait for green
+git tag -a v1.4.0 -m "v1.4.0"
+git push origin v1.4.0        # same commit, no new CI needed
+----
+
+Do not commit anything between the green run and the tag.
+
+== Fix on GitLab
+
+Pipelines run for tags by default unless your rules exclude them. If you use `rules:` or `workflow:rules`, allow tag pipelines:
+
+[source,yaml]
+----
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+test:
+  image: dlang2/ldc-ubuntu:latest   # or dlang2/dmd-ubuntu
+  script:
+    - dub test
+----
+
+As on GitHub, a branch pipeline on the same commit you later tag also counts.
+
+== Annotated vs. lightweight tags
+
+Both work. A lightweight tag (`git tag v1.4.0`) points straight at a commit. An annotated tag (`git tag -a v1.4.0 -m ...`) is its own object that points at the commit; dubx *peels* it (follows the tag object to the commit) before looking up CI. GitLab reports the peeled commit itself. What matters is only which commit the tag ends up at.
+
+== Check the result
+
+* `dubx search <your package> --verbose` shows e.g. `CI passing (github-checks, v1.4.0 @ 86e74d6, 2025-10-01, reported by the package's own CI)`. The short SHA must match `git rev-list -n 1 v1.4.0`.
+* `dubx search <your package> --json` has a `ci` object (`state`, `tag`, `sha`, `url`), or `ci: null` with `ciReason`.
+* On GitHub, open `https://github.com/<owner>/<repo>/commit/<sha>`: the check mark next to the commit is what dubx reads. With the GitHub CLI: `gh api repos/<owner>/<repo>/commits/v1.4.0/check-runs --jq '.check_runs[] | [.name,.conclusion]'`.
+* On GitLab, the tag page shows the pipeline for its commit.
+
+Results are cached for 60 minutes; use `--no-cache` to re-check right away.
