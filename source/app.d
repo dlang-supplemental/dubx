@@ -8,6 +8,7 @@ import std.stdio;
 import std.string : toLower;
 
 import search : cmdSearch, parseSearchArgs, SearchOptions, ExitCode;
+import dispatch : route, Target, redubHandles;
 import version_;
 import prohelp.config;
 import prohelp.intercept;
@@ -29,86 +30,56 @@ private void showHelp(string[] args)
 
 int main(string[] args)
 {
-	if (args.length < 2)
+	auto r = route(args[1 .. $]);
+	final switch (r.target)
 	{
-		showHelp([args[0], "?"]);
-		return 2;
-	}
-
-	{
-		auto t = args[1].toLower;
-		if (t == "?" || t == "help" || t == "--help" || t == "-h" || t == "--?"
-			|| t.startsWith("?:") || t.startsWith("help:") || t.startsWith("--help:")
-			|| t.startsWith("-h:") || t.startsWith("--?:"))
+	case Target.help:
+		if (args.length < 2)
 		{
-			showHelp(args);
-			return 0;
+			showHelp([args[0], "?"]);
+			return 2;
 		}
-	}
-
-	auto cmd = args[1].toLower;
-	auto rest = args[2 .. $];
-
-	switch (cmd)
-	{
-	case "version", "--version", "-V":
+		showHelp(args);
+		return 0;
+	case Target.version_:
 		writeln("dubx ", dubxVersion);
 		return 0;
-
-	case "which":
-		return cmdWhich(rest);
-
-	// Registry search grouped into status buckets (--raw = old dub passthrough)
-	case "search":
-		return runSearch(rest);
-
-	// Opaque registry namespace: dubx publish <anything…> → dub-publish <anything…>
-	// Exception slots: add remaps here only when dubx redesigns a verb.
-	case "publish":
-		return runPublish(rest);
-
-	// Local/private package mirror helper → dubproxy (when installed)
-	case "local":
-		return runLocal(rest);
-
-	// Short aliases (same backend; not a second vocabulary)
-	case "register", "login", "logout", "update", "status",
-		"remove", "logo", "logo-delete", "docs-url", "categories",
-		"hooks", "hooks-disable", "repo", "perms-add", "leave":
-		return runTool("dub-publish", [cmd] ~ rest, ToolKind.registry);
-
-	// Build / package workflow → redub, fallback dub
-	case "build", "run", "test", "describe", "lint", "clean", "fetch",
-		"upgrade", "add", "remove-dep", "dustmite", "generate", "init",
-		"convert", "add-path", "remove-path", "add-local",
-		"remove-local", "list", "list-overrides", "add-override",
-		"remove-override", "clean-caches":
-		// Map dubx alias to actual tool args
-		if (cmd == "remove-dep")
-			return runBuild(["remove"] ~ rest);
-		return runBuild([cmd] ~ rest);
-	case "dub":
-		return runTool("dub", rest, ToolKind.build);
-
-	case "redub":
-		return runTool("redub", rest, ToolKind.buildForced);
-
-	case "dub-publish":
-		return runTool("dub-publish", rest, ToolKind.registry);
-
-	default:
-		// Unknown verb: prefer redub, then dub (passthrough)
-		return runBuild([cmd] ~ rest);
+	case Target.which:
+		return cmdWhich(r.args);
+	// Registry search grouped into status buckets (--raw = dub search passthrough)
+	case Target.search:
+		return runSearch(r.args);
+	// Opaque registry namespace: dubx publish <anything> -> dub-publish <anything>
+	case Target.publish:
+		return runPublish(r.args);
+	// Local/private package mirror helper -> dubproxy (when installed)
+	case Target.local:
+		return runLocal(r.args);
+	case Target.registry:
+		return runTool("dub-publish", r.args, ToolKind.registry);
+	case Target.build:
+		return runBuild(r.args);
+	case Target.dub:
+		return runTool("dub", r.args, ToolKind.build);
+	case Target.redub:
+		return runTool("redub", r.args, ToolKind.buildForced);
+	case Target.dubPublish:
+		return runTool("dub-publish", r.args, ToolKind.registry);
+	case Target.unknown:
+		// Never forward an unknown word: redub would fetch and run a package by that name.
+		stderr.writeln(r.hint);
+		return 2;
 	}
 }
 
-/// `dubx search`: grouped registry search, or `--raw` passthrough to redub/dub.
+/// `dubx search`: grouped registry search, or `--raw` passthrough to dub search
+/// (redub has no search command and would fetch a package called "search").
 int runSearch(string[] rest)
 {
 	SearchOptions o;
 	auto err = parseSearchArgs(rest, o);
 	if (o.raw)
-		return runBuild(["search"] ~ o.passthrough);
+		return runTool("dub", ["search"] ~ o.passthrough, ToolKind.build);
 	if (err.length)
 	{
 		stderr.writeln("dubx search: ", err);
@@ -145,6 +116,9 @@ enum ToolKind
 
 int runBuild(string[] toolArgs)
 {
+	// redub treats a verb it does not implement as a package name to fetch; send those to dub.
+	if (toolArgs.length && !redubHandles(toolArgs[0]))
+		return runTool("dub", toolArgs, ToolKind.build);
 	if (findOnPath("redub").length)
 		return runTool("redub", toolArgs, ToolKind.buildForced);
 	stderr.writeln("dubx: redub not found on PATH; falling back to dub");
