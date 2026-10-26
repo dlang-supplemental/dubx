@@ -138,13 +138,15 @@ dubx can only count dependents **among one search's results** (`used by N of the
 
 ### (a) Read the CI the repo already has (cheap, now)
 
-During the 24 h stats refresh, ask the repo host what CI reported for the newest release tag (`v<ver>`, then `<ver>`), falling back to the default branch head:
+**Exact release commit only.** A CI result is shown only when it belongs to exactly the code the registry serves. During the 24 h stats refresh, resolve the newest version's tag (`v<ver>`, then `<ver>`) to its commit SHA (peeling annotated tags), then ask for CI results *on that SHA*. There is **no fallback to the default branch**: `main` HEAD may be a different commit, and its result says nothing about the release. A run triggered by a push to `main` on the same SHA does count, because it tested the same code.
 
-- GitHub: `GET /repos/{o}/{r}/commits/{ref}/check-runs` (GitHub Actions and apps), then `GET .../commits/{ref}/status` (legacy combined status) when there are no check runs.
-- GitLab: `GET /projects/:id/pipelines?ref={ref}&per_page=1`.
-- Gitea/Forgejo: `GET /repos/{o}/{r}/commits/{ref}/status` (combined status, same shape as GitHub's).
+- GitHub: `GET /repos/{o}/{r}/git/ref/tags/{tag}` (+ `GET .../git/tags/{sha}` to peel annotated tags), then `GET /repos/{o}/{r}/commits/{sha}/check-runs` and `GET .../commits/{sha}/status`; failing beats pending beats passing.
+- GitLab: `GET /projects/:id/repository/tags/{tag}` (commit is already peeled), then `GET /projects/:id/pipelines?sha={sha}&per_page=1`.
+- Gitea/Forgejo: `GET /repos/{o}/{r}/tags/{tag}` for the commit, then `GET /repos/{o}/{r}/commits/{sha}/status`.
 
-Store `ciState` (passing/failing/pending/unknown), `ciRef`, `ciDate`, `ciUrl` in `DbPackageStats`, and show a badge linking to the run, labelled **"reported by the package's own CI"**. That is one or two extra requests per package per day, on host APIs the registry already calls (`RepositoryInfo` in repository.d ~line 98; github.d ~line 137, gitlab.d ~line 144, gitea.d ~line 146). dubx 0.5.0 implements this client-side.
+No tag, or no CI on that commit, means **unknown**, never passing or failing. The unknown badge on code.dlang.org should link to a registry help page for authors (e.g. `/docs/ci-status`) with the same guidance as dubx's [Link your CI to your release](https://github.com/dlang-supplemental/dubx/blob/main/docs/ci-status-for-releases.adoc): why it is unknown (no tag / no CI on the tagged commit); on GitHub add `push: tags: ['v*']` to the workflow or tag a commit `main` CI already ran on; on GitLab allow tag pipelines in `workflow:rules`; annotated and lightweight tags both work (annotated ones are peeled); a minimal DMD + LDC matrix (`dlang-community/setup-dlang`, `dub test`); and how to check the result on the commit page.
+
+Store `ciState` (passing/failing/pending/unknown), `ciTag`, `ciSha`, `ciDate`, `ciUrl` in `DbPackageStats`, and show a badge linking to the run, labelled **"reported by the package's own CI"**. That is one or two extra requests per package per day, on host APIs the registry already calls (`RepositoryInfo` in repository.d ~line 98; github.d ~line 137, gitlab.d ~line 144, gitea.d ~line 146). dubx 0.5.0 implements this client-side.
 
 ### (b) Opt-in shared CI (cheap for the registry, run by maintainers)
 
@@ -158,7 +160,7 @@ Build in a registry-owned sandbox only for a bounded set: the top N by downloads
 
 - **Label the source.** (a) is self-reported: maintainers control their own CI and can make it green. (b) is self-run but uses the registry's workflow, so the matrix is known. (c) is verified. Show which one produced the badge, and rank verified above self-reported in any scoring.
 - **CI never demotes on its own.** No CI is *unknown*, not failing. A failing self-reported run may block *Finished* but never marks a package dead.
-- **Staleness.** Always show the date and ref: "passing on v0.10.0, 2024-06" is a different claim from "passing on master, today". An old green result describes old compilers. After `quietDays`, or after a new DMD/LDC frontend release, show it as *last known green* and stop counting it as evidence for *Finished*. Prefer the newest release tag; fall back to the branch only when the tag has no CI, and say so.
+- **Staleness.** Always show the date and ref: "passing on v0.10.0, 2024-06" is a different claim from "passing on master, today". An old green result describes old compilers. After `quietDays`, or after a new DMD/LDC frontend release, show it as *last known green* and stop counting it as evidence for *Finished*. Only the newest release's tagged commit counts; never substitute a branch result.
 - **Abuse.** For (b), webhook reports must be signed per package (the existing webhook secret) and must point at a run URL the registry can fetch back; ignore reports for refs that do not exist. For (c), rate-limit rebuild requests and never build on unauthenticated triggers.
 
 ## Where to change dub-registry
@@ -218,7 +220,7 @@ Resolved: a declared status with a 404 repo keeps its bucket, with a *repo unrea
 ```
 Active (5)
   dyaml          0.10.0       last release 0.10.0 (2024-06), repo moved to dlang-community/D-YAML, pushed 2026-01, used by 4 of these results
-  mir-ion        2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on tag v2.3.5 (2025-11)
+  mir-ion        2.3.5        last release 2.3.5 (2025-11), pushed 2025-11, CI failing on v2.3.5 (2025-11)
 Quiet (3)
   uniconf        0.2.2        last release 0.2.2 (2020-04), pushed 2021-04
 Repo gone or archived (3)
