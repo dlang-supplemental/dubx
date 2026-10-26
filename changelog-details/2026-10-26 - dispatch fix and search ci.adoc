@@ -1,0 +1,17 @@
+= 0.5.0: command dispatch fix, CI status, dependents, 404 grace period
+
+== Command dispatch
+
+Root cause: in 0.3.x, `dubx` forwarded `search` (listed as a build verb) and any unknown first word to redub. redub has no `search` command; any first argument it does not know goes to its default run path, which treats the word as a package name, fetches it from the registry and runs it. So `dubx search yaml` fetched a package called `search`.
+
+Fix: `source/dispatch.d` routes every first word with a pure, unit-tested `route()`. Built-ins (`search`, `help`, `version`, `which`, `publish`, `local`, registry aliases) always win. Only verbs redub actually implements go to redub; other dub verbs (`fetch`, `list`, `add`, …) go to dub. Anything else prints a did-you-mean hint and `dubx dub run <name>`, and exits 2. `--version`, `-v`, `-V` and `version` print the version.
+
+== Search
+
+* Build status reported by the package's own CI: GitHub check runs, then combined commit status; GitLab pipelines. Ref order: `v<latest>`, `<latest>`, default branch. Shown with its date so an old green result is visible as old. Passing counts toward *Finished*; failing keeps *Quiet*.
+* Dependents among the search results only (`used by N of these results`), with a footnote and `dependentsScope` in JSON. A registry-wide count would need every package's info.
+* `repo-state.json` in the dubx cache keeps the first date a repo answered 404/451 and the last declared `x:status`. A declared status survives a 404 for `goneGraceDays` (30) with `repo unreachable since <date>`; then the package moves to *Repo gone*.
+
+== Upstream proposal
+
+New *Dependency graph* section (per-version edges, precomputed reverse index, API endpoints; prior art registry.antora-supplemental.org) and *Build status* section (read existing CI, opt-in shared workflow, limited registry builds; trust and staleness). The deleted-repo open question is resolved with the 30-day rule.
