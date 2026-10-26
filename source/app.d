@@ -7,6 +7,7 @@ import std.process : environment, spawnProcess, wait;
 import std.stdio;
 import std.string : toLower;
 
+import search : cmdSearch, parseSearchArgs, SearchOptions, ExitCode;
 import version_;
 import prohelp.config;
 import prohelp.intercept;
@@ -57,6 +58,10 @@ int main(string[] args)
 	case "which":
 		return cmdWhich(rest);
 
+	// Registry search grouped into status buckets (--raw = old dub passthrough)
+	case "search":
+		return runSearch(rest);
+
 	// Opaque registry namespace: dubx publish <anything…> → dub-publish <anything…>
 	// Exception slots: add remaps here only when dubx redesigns a verb.
 	case "publish":
@@ -75,7 +80,7 @@ int main(string[] args)
 	// Build / package workflow → redub, fallback dub
 	case "build", "run", "test", "describe", "lint", "clean", "fetch",
 		"upgrade", "add", "remove-dep", "dustmite", "generate", "init",
-		"convert", "search", "add-path", "remove-path", "add-local",
+		"convert", "add-path", "remove-path", "add-local",
 		"remove-local", "list", "list-overrides", "add-override",
 		"remove-override", "clean-caches":
 		// Map dubx alias to actual tool args
@@ -95,6 +100,21 @@ int main(string[] args)
 		// Unknown verb: prefer redub, then dub (passthrough)
 		return runBuild([cmd] ~ rest);
 	}
+}
+
+/// `dubx search`: grouped registry search, or `--raw` passthrough to redub/dub.
+int runSearch(string[] rest)
+{
+	SearchOptions o;
+	auto err = parseSearchArgs(rest, o);
+	if (o.raw)
+		return runBuild(["search"] ~ o.passthrough);
+	if (err.length)
+	{
+		stderr.writeln("dubx search: ", err);
+		return ExitCode.usage;
+	}
+	return cmdSearch(o);
 }
 
 /// Forward to dub-publish. Remap only verbs dubx explicitly redesigns.
