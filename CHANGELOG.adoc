@@ -3,7 +3,8 @@
 == 0.5.0 (2026-10-26)
 
 * Fix: built-in commands always win. `dubx search …` on 0.3.x went to redub, which fetched and ran a registry package named `search`. Unknown first words now print a hint (did-you-mean, `dubx dub run <pkg>`) and exit 2 instead of fetching; verbs redub does not know (`fetch`, `list`, `add`, …) go to dub.
-* `dubx search` shows build status reported by the package's own CI (GitHub check runs / commit status, GitLab pipelines; latest release tag, then default branch) with its date. A passing build counts toward *Finished*.
+* `dubx search` shows build status reported by the package's own CI for the *exact release commit only*: the latest registry version's tag (`v<ver>`, then `<ver>`) is resolved to its SHA (annotated tags peeled), then GitHub check runs + combined status or GitLab pipelines for that SHA. No branch fallback. Shown with date, and tag + short SHA in `--verbose`. A passing build counts toward *Finished*. No tag or no CI on that commit: `ci: null` + `ciReason`, never passing or failing.
+* Packages without a release CI status link (OSC 8 hyperlink on capable terminals, plain URL otherwise; `ciHelpUrl` in JSON) to the new author how-to link:docs/ci-status-for-releases.adoc[Link your CI to your release].
 * `used by N of these results`: dependents counted among the search results only (no registry reverse-dependency API).
 * A repo answering 404/451 overrides a declared `x:status` only after 30 days (`goneGraceDays`); until then the reason says `repo unreachable since <date>`. First-seen dates live in `repo-state.json` in the dubx cache.
 * Upstream proposal gains *Dependency graph* and *Build status* sections.

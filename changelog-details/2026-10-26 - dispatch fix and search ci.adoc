@@ -8,7 +8,8 @@ Fix: `source/dispatch.d` routes every first word with a pure, unit-tested `route
 
 == Search
 
-* Build status reported by the package's own CI: GitHub check runs, then combined commit status; GitLab pipelines. Ref order: `v<latest>`, `<latest>`, default branch. Shown with its date so an old green result is visible as old. Passing counts toward *Finished*; failing keeps *Quiet*.
+* Build status reported by the package's own CI, tied to exactly what the registry serves: the latest version's tag is resolved to a commit SHA (annotated tags peeled) and only CI results on that SHA count (GitHub check runs + combined status, GitLab pipelines by SHA). An earlier draft fell back to the default branch; that was removed, because `main` HEAD can be a different commit. A unit test proves a failing `main` HEAD at another commit is ignored. Shown with its date so an old green result is visible as old. Passing counts toward *Finished*; failing keeps *Quiet*; none is neither.
+* `docs/ci-status-for-releases.adoc` tells authors how to get a status (tag-triggered workflow, or tag a commit CI already ran on; GitLab tag pipelines; annotated vs. lightweight tags). dubx links it with an OSC 8 hyperlink where supported.
 * Dependents among the search results only (`used by N of these results`), with a footnote and `dependentsScope` in JSON. A registry-wide count would need every package's info.
 * `repo-state.json` in the dubx cache keeps the first date a repo answered 404/451 and the last declared `x:status`. A declared status survives a 404 for `goneGraceDays` (30) with `repo unreachable since <date>`; then the package moves to *Repo gone*.
 
