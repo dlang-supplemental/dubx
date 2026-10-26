@@ -101,15 +101,30 @@ Package id: `dlang-supplemental.dubx` (CI ready; first listing needs a one-time 
 
 === From source
 
-Requires `openshellorg/prohelp` at `deps/prohelp` (CI checkouts `v0.2.3`; locally clone or junction it there).
+Dependencies (`prohelp`, `sdlang-d`) come from https://code.dlang.org[code.dlang.org]; no extra checkout is needed.
 
 [source,console]
 ----
 git clone https://github.com/dlang-supplemental/dubx.git
 cd dubx
-git clone --branch v0.2.3 https://github.com/openshellorg/prohelp.git deps/prohelp
 dub build --build=release
 ----
+
+=== Testing against a local prohelp
+
+To build against a local `prohelp` checkout instead of the registry copy, register it with DUB locally (testing only; never commit a path dependency):
+
+[source,console]
+----
+dub add-local C:\code\github.com\openshellorg\prohelp 0.2.3
+dub build --force
+# when done:
+dub remove-local C:\code\github.com\openshellorg\prohelp
+----
+
+Pass an explicit version that satisfies `~>0.2.3`; otherwise DUB derives it from the checkout's git state. Alternatively, put a path entry in this repo's `dub.selections.json` (`"prohelp": {"path": "C:/code/github.com/openshellorg/prohelp"}`); that file is git-ignored here, so do not force-add it.
+
+WARNING: DUB does not currently warn when a local package or a selections path entry is active. Run `dub list` (look for your path) or `dub describe prohelp` to confirm which copy is used, and remove the local registration before judging a registry build. `dub add-override` is deprecated upstream; do not use it.
 
 Then `packaging/install.ps1` or put `dubx` on `PATH`.
 
