@@ -33,6 +33,10 @@ struct Thresholds
 	int answeredPercent = 50;
 	/// Minimum sampled issues before the share means anything.
 	int minIssues = 3;
+	/// A repo must keep answering 404/451 this long (first seen -> now)
+	/// before it overrides a maintainer-declared status. Until then the
+	/// declared bucket stays and the reason warns "repo unreachable since".
+	int goneGraceDays = 30;
 }
 
 /// Maintainer-declared statuses (proposed recipe key `x:status`).
@@ -135,8 +139,61 @@ struct Facts
 	int issuesAnswered;          /// of those, closed or commented
 	/// Builds with current DMD/LDC: -1 unknown (hook; no source yet), 0 no, 1 yes.
 	int buildsWithCurrent = -1;
-	/// Reverse dependencies: hook, no registry endpoint yet (-1 unknown).
-	long dependents = -1;
+
+	/// Default branch reported by the repo host.
+	string defaultBranch;
+	/// When dubx first saw the repo answer 404/451 (from the dubx state file).
+	Nullable!SysTime repoGoneSince;
+
+	/// CI result the package's own CI reported for `ciRef`:
+	/// "" unknown, "passing", "failing", "pending".
+	string ciState;
+	string ciSource;   /// github-checks, github-status, gitlab-pipeline
+	string ciRef;      /// e.g. "tag v0.10.0" or "branch master"
+	string ciUrl;
+	Nullable!SysTime ciDate;
+
+	/// Packages in the same search results that depend on this one.
+	/// Not registry-wide: code.dlang.org has no reverse-dependency API.
+	string[] dependentsInResults;
+}
+
+/// Fill `dependentsInResults` for every package from the others' dependencies.
+/// A package's own subpackages do not count.
+void computeDependents(Facts[] all)
+{
+	foreach (ref f; all)
+	{
+		f.dependentsInResults = null;
+		auto top = parentName(f.name).toLower;
+		auto isTop = f.name.indexOf(':') < 0;
+		foreach (ref o; all)
+		{
+			if (parentName(o.name).toLower == top)
+				continue;
+			foreach (d; o.dependencies)
+			{
+				auto dl = d.toLower;
+				if (dl == f.name.toLower || (isTop && parentName(dl) == top))
+				{
+					f.dependentsInResults ~= o.name;
+					break;
+				}
+			}
+		}
+	}
+}
+
+private string ymd(SysTime t)
+{
+	return format("%04d-%02d-%02d", t.year, cast(int) t.month, t.day);
+}
+
+/// True once a 404/451 repo has been unreachable for `goneGraceDays`.
+bool goneSustained(const ref Facts f, SysTime now, Thresholds t = defaultThresholds)
+{
+	return f.repo == RepoState.gone && !f.repoGoneSince.isNull
+		&& (now - f.repoGoneSince.get).total!"days" >= t.goneGraceDays;
 }
 
 /// True when sampled recent issues mostly got a reply or were closed.
@@ -193,7 +250,9 @@ string activitySummary(const ref Facts f)
 
 	final switch (f.repo)
 	{
-	case RepoState.gone: parts ~= "repo 404"; break;
+	case RepoState.gone:
+		parts ~= f.repoGoneSince.isNull ? "repo 404" : "repo 404 since " ~ ymd(f.repoGoneSince.get);
+		break;
 	case RepoState.archived: parts ~= "repo archived"; break;
 	case RepoState.moved:
 		parts ~= "repo moved to " ~ f.repoMovedTo;
@@ -213,6 +272,11 @@ string activitySummary(const ref Facts f)
 	}
 	if (f.issuesSampled > 0)
 		parts ~= format("%s/%s recent issues answered", f.issuesAnswered, f.issuesSampled);
+	if (f.ciState.length)
+		parts ~= format("CI %s on %s%s", f.ciState, f.ciRef,
+			f.ciDate.isNull ? "" : " (" ~ ym(f.ciDate.get) ~ ")");
+	if (f.dependentsInResults.length)
+		parts ~= format("used by %s of these results", f.dependentsInResults.length);
 	if (f.buildsWithCurrent == 1) parts ~= "builds with current compilers";
 	else if (f.buildsWithCurrent == 0) parts ~= "fails to build with current compilers";
 	return parts.join(", ");
@@ -227,14 +291,20 @@ string activitySummary(const ref Facts f)
 Verdict classify(const ref Facts f, const(string)[] resultNames, SysTime now,
 	Thresholds t = defaultThresholds)
 {
-	// 1. Hard facts: repo gone or archived
-	if (f.repo == RepoState.gone || f.repo == RepoState.archived)
+	// 1. Hard facts: repo archived, or 404/451. A 404 overrides a declared
+	//    status only once it has lasted goneGraceDays (repos come back).
+	auto declared = declaredStatuses.canFind(f.declaredStatus);
+	if (f.repo == RepoState.archived
+		|| (f.repo == RepoState.gone && (!declared || goneSustained(f, now, t))))
 		return Verdict(Bucket.gone, activitySummary(f));
 
 	// 2. Maintainer-declared status beats every heuristic
-	if (f.declaredStatus.length)
+	if (declared)
 	{
-		auto why = "declared " ~ f.declaredStatus ~ "; " ~ activitySummary(f);
+		auto why = "declared " ~ f.declaredStatus ~ "; "
+			~ (f.repo == RepoState.gone ? "repo unreachable since "
+				~ (f.repoGoneSince.isNull ? ymd(now) : ymd(f.repoGoneSince.get)) ~ "; " : "")
+			~ activitySummary(f);
 		switch (f.declaredStatus)
 		{
 		case "complete", "maintenance-only": return Verdict(Bucket.finished, why);
@@ -275,10 +345,12 @@ Verdict classify(const ref Facts f, const(string)[] resultNames, SysTime now,
 		return Verdict(Bucket.active, activitySummary(f));
 	if (age <= t.quietDays)
 		return Verdict(Bucket.slow, activitySummary(f));
-	// Quiet + answers issues + not known to be broken => reads as finished.
-	if (answersIssues(f, t) == 1 && f.buildsWithCurrent != 0)
+	// Quiet + (answers issues or its CI passes) + not known to be broken
+	// => reads as finished.
+	if ((answersIssues(f, t) == 1 || f.ciState == "passing")
+		&& f.ciState != "failing" && f.buildsWithCurrent != 0)
 		return Verdict(Bucket.finished, "quiet but " ~ activitySummary(f)
-			~ (f.buildsWithCurrent == -1 ? ", build check n/a" : ""));
+			~ (!f.ciState.length && f.buildsWithCurrent == -1 ? ", build check n/a" : ""));
 	return Verdict(Bucket.quiet, activitySummary(f));
 }
 
@@ -350,6 +422,41 @@ unittest
 	// Nothing known
 	Facts none = { name: "y", registryError: true };
 	assert(classify(none, names, now).bucket == Bucket.unknown);
+
+	// CI passing is evidence for Finished; failing keeps Quiet
+	Facts q = { name: "q", repo: RepoState.ok, ciState: "passing", ciRef: "tag v1.0.0" };
+	q.lastRelease = at(2019, 3);
+	q.ciDate = at(2019, 3);
+	auto qv = classify(q, names, now);
+	assert(qv.bucket == Bucket.finished, qv.reason);
+	assert(qv.reason.canFind("CI passing on tag v1.0.0 (2019-03)"), qv.reason);
+	q.ciState = "failing";
+	q.issuesSampled = 5; q.issuesAnswered = 5;
+	assert(classify(q, names, now).bucket == Bucket.quiet);
+
+	// 404 vs declared status: grace period, then gone
+	Facts g = { name: "g", repo: RepoState.gone, declaredStatus: "complete" };
+	g.lastRelease = at(2018, 1);
+	auto gv = classify(g, names, now); // first seen now
+	assert(gv.bucket == Bucket.finished && gv.reason.canFind("repo unreachable since 2026-10-26"), gv.reason);
+	g.repoGoneSince = now - 29.days;
+	assert(classify(g, names, now).bucket == Bucket.finished);
+	g.repoGoneSince = now - 30.days;
+	auto gg = classify(g, names, now);
+	assert(gg.bucket == Bucket.gone && gg.reason.canFind("repo 404 since 2026-09-26"), gg.reason);
+	// Without a declaration a 404 is gone at once
+	g.declaredStatus = null;
+	g.repoGoneSince.nullify();
+	assert(classify(g, names, now).bucket == Bucket.gone);
+
+	// Dependents among the results
+	Facts[] fs = [Facts("dyaml"), Facts("configy"), Facts("dyaml:yaml_gen"), Facts("uniconf")];
+	fs[1].dependencies = ["dyaml"];
+	fs[3].dependencies = ["uniconf:yaml", "dyaml:yaml_gen"];
+	computeDependents(fs);
+	assert(fs[0].dependentsInResults == ["configy", "uniconf"], fs[0].dependentsInResults.join(","));
+	assert(fs[2].dependentsInResults == ["uniconf"]);
+	assert(fs[3].dependentsInResults.length == 0);
 
 	// Threshold edges
 	Facts e = { name: "e", repo: RepoState.ok };

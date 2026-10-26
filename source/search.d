@@ -431,6 +431,7 @@ void applyGitHub(ref Facts f, string body_)
 	if (stars >= 0)
 		f.stars = stars;
 	f.openIssues = num(j, "open_issues_count");
+	f.defaultBranch = str(j, "default_branch");
 	auto full = str(j, "full_name");
 	if (f.repo == RepoState.ok && full.length && full.toLower != f.repoSlug.toLower)
 	{
@@ -480,9 +481,176 @@ void applyGitLab(ref Facts f, string body_)
 		if (ap.type == JSONType.true_)
 			f.repo = RepoState.archived;
 	f.repoPushed = parseTime(str(j, "last_activity_at"));
+	f.defaultBranch = str(j, "default_branch");
 	auto stars = num(j, "star_count");
 	if (stars >= 0)
 		f.stars = stars;
+}
+
+// --- CI status reported by the package's own CI (build-status step a) ---
+
+private Nullable!SysTime newer(Nullable!SysTime a, Nullable!SysTime b)
+{
+	if (a.isNull) return b;
+	if (b.isNull) return a;
+	return a.get > b.get ? a : b;
+}
+
+/// GitHub `GET /repos/{o}/{r}/commits/{ref}/check-runs`. Returns false when
+/// there are no check runs (caller then tries the commit-status API).
+bool applyCheckRuns(ref Facts f, string body_)
+{
+	auto j = parseJSON(body_);
+	auto runs = "check_runs" in j.object;
+	if (runs is null || runs.type != JSONType.array || !runs.array.length)
+		return false;
+	bool failing, pending;
+	Nullable!SysTime last;
+	string url;
+	foreach (r; runs.array)
+	{
+		auto st = str(r, "status"), c = str(r, "conclusion");
+		if (st != "completed")
+			pending = true;
+		else if (["failure", "timed_out", "action_required", "startup_failure"].canFind(c))
+		{
+			failing = true;
+			if (!url.length) url = str(r, "html_url");
+		}
+		last = newer(last, parseTime(str(r, "completed_at")));
+	}
+	f.ciState = failing ? "failing" : pending ? "pending" : "passing";
+	f.ciSource = "github-checks";
+	f.ciDate = last;
+	if (url.length) f.ciUrl = url;
+	return true;
+}
+
+/// GitHub `GET /repos/{o}/{r}/commits/{ref}/status` (combined commit status).
+bool applyCombinedStatus(ref Facts f, string body_)
+{
+	auto j = parseJSON(body_);
+	if (num(j, "total_count", 0) <= 0)
+		return false;
+	auto st = str(j, "state");
+	f.ciState = st == "success" ? "passing" : st == "pending" ? "pending" : "failing";
+	f.ciSource = "github-status";
+	if (auto sp = "statuses" in j.object)
+		if (sp.type == JSONType.array)
+			foreach (e; sp.array)
+			{
+				f.ciDate = newer(f.ciDate, parseTime(str(e, "updated_at")));
+				if (!f.ciUrl.length) f.ciUrl = str(e, "target_url");
+			}
+	return true;
+}
+
+/// GitLab `GET /projects/:id/pipelines?ref=<ref>&per_page=1`.
+bool applyGitLabPipelines(ref Facts f, string body_)
+{
+	auto j = parseJSON(body_);
+	if (j.type != JSONType.array || !j.array.length)
+		return false;
+	auto p = j.array[0];
+	auto st = str(p, "status");
+	if (st == "success") f.ciState = "passing";
+	else if (st == "failed") f.ciState = "failing";
+	else if (["running", "pending", "created", "waiting_for_resource", "preparing", "scheduled"].canFind(st)) f.ciState = "pending";
+	else return false; // canceled, skipped, manual: says nothing
+	f.ciSource = "gitlab-pipeline";
+	f.ciDate = parseTime(str(p, "updated_at"));
+	f.ciUrl = str(p, "web_url");
+	return true;
+}
+
+// --- Remembered repo state (dubx cache): when a 404 was first seen ---
+
+/// Key in the repo-state file.
+string repoStateKey(const ref Facts f)
+{
+	return f.repoKind ~ ":" ~ f.repoSlug.toLower;
+}
+
+/// Merge one package into the remembered repo state and back.
+/// 404/451: keep the first-seen date (record `now` if new) and restore a
+/// declared status remembered from when the repo was reachable. Reachable:
+/// forget the 404 date and remember the declared status.
+void syncRepoState(ref JSONValue state, ref Facts f, SysTime now)
+{
+	if (!f.repoSlug.length || f.repo == RepoState.unknown || f.repo == RepoState.notChecked)
+		return;
+	if (state.type != JSONType.object)
+		state = JSONValue(string[string].init);
+	auto key = repoStateKey(f);
+	JSONValue e = (key in state.object) ? state[key] : JSONValue(string[string].init);
+	if (f.repo == RepoState.gone)
+	{
+		auto since = parseTime(str(e, "firstGone"));
+		if (since.isNull)
+		{
+			since = now;
+			e["firstGone"] = now.toISOExtString();
+		}
+		f.repoGoneSince = since;
+		if (!f.declaredStatus.length)
+		{
+			auto d = str(e, "declaredStatus");
+			if (declaredStatuses.canFind(d))
+				f.declaredStatus = d;
+		}
+	}
+	else
+	{
+		if ("firstGone" in e.object)
+			e.object.remove("firstGone");
+		if (f.declaredStatus.length)
+			e["declaredStatus"] = f.declaredStatus;
+		else if ("declaredStatus" in e.object)
+			e.object.remove("declaredStatus");
+	}
+	if (e.object.length)
+		state[key] = e;
+	else if (key in state.object)
+		state.object.remove(key);
+}
+
+unittest
+{
+	import std.datetime : DateTime;
+	auto t0 = SysTime(DateTime(2026, 9, 1), UTC());
+	auto t1 = SysTime(DateTime(2026, 10, 26), UTC());
+	JSONValue st;
+	Facts ok = { name: "p", repoKind: "github", repoSlug: "o/P", repo: RepoState.ok, declaredStatus: "complete" };
+	syncRepoState(st, ok, t0);
+	assert(st["github:o/p"]["declaredStatus"].str == "complete");
+	Facts gone = { name: "p", repoKind: "github", repoSlug: "o/p", repo: RepoState.gone };
+	syncRepoState(st, gone, t0);
+	assert(gone.repoGoneSince.get == t0 && gone.declaredStatus == "complete");
+	Facts again = { name: "p", repoKind: "github", repoSlug: "o/p", repo: RepoState.gone };
+	syncRepoState(st, again, t1);
+	assert(again.repoGoneSince.get == t0); // first-seen date is kept
+	assert(goneSustained(again, t1));
+	Facts back = { name: "p", repoKind: "github", repoSlug: "o/p", repo: RepoState.ok };
+	syncRepoState(st, back, t1);
+	assert(("github:o/p" in st.object) is null); // repo back, nothing declared: forgotten
+
+	Facts c;
+	assert(applyCheckRuns(c, `{"total_count":2,"check_runs":[
+		{"status":"completed","conclusion":"success","completed_at":"2024-06-20T10:00:00Z"},
+		{"status":"completed","conclusion":"skipped","completed_at":"2024-06-21T10:00:00Z"}]}`));
+	assert(c.ciState == "passing" && c.ciDate.get.day == 21);
+	Facts c2;
+	assert(applyCheckRuns(c2, `{"total_count":1,"check_runs":[{"status":"completed","conclusion":"failure","html_url":"u"}]}`));
+	assert(c2.ciState == "failing" && c2.ciUrl == "u");
+	Facts c3;
+	assert(!applyCheckRuns(c3, `{"total_count":0,"check_runs":[]}`) && !c3.ciState.length);
+	assert(!applyCombinedStatus(c3, `{"state":"pending","total_count":0,"statuses":[]}`));
+	assert(applyCombinedStatus(c3, `{"state":"success","total_count":1,"statuses":[{"updated_at":"2020-01-02T00:00:00Z","target_url":"t"}]}`));
+	assert(c3.ciState == "passing" && c3.ciSource == "github-status" && c3.ciUrl == "t");
+	Facts c4;
+	assert(applyGitLabPipelines(c4, `[{"status":"failed","updated_at":"2021-03-04T00:00:00Z","web_url":"w"}]`));
+	assert(c4.ciState == "failing" && c4.ciUrl == "w");
+	assert(!applyGitLabPipelines(c4, `[]`));
 }
 
 unittest
@@ -599,6 +767,9 @@ private void gather(ref Facts f, bool useCache, RunLog log)
 					}
 				}
 			}
+			// CI status the package's own CI reported (build-status step a).
+			if ((f.repo == RepoState.ok || f.repo == RepoState.moved) && !atomicLoad(githubRateLimited))
+				fetchGitHubCi(f, hdr, useCache, log);
 			// Issue responsiveness only matters for quiet packages; saves API quota.
 			auto last = lastActivity(f);
 			if ((f.repo == RepoState.ok || f.repo == RepoState.moved) && !last.isNull
@@ -625,13 +796,102 @@ private void gather(ref Facts f, bool useCache, RunLog log)
 	case "gitlab":
 		auto r = httpGet(gitlabApi ~ "/projects/" ~ encodeComponent(f.repoSlug), null, useCache, log);
 		if (r.status == 200)
+		{
 			try applyGitLab(f, r.body_); catch (Exception) {}
-		else if (r.status == 404)
+			if (f.repo == RepoState.ok)
+				foreach (rf; ciRefs(f))
+				{
+					auto pr = httpGet(format("%s/projects/%s/pipelines?ref=%s&per_page=1", gitlabApi,
+						encodeComponent(f.repoSlug), encodeComponent(rf[1])), null, useCache, log);
+					bool got;
+					if (pr.status == 200)
+						try got = applyGitLabPipelines(f, pr.body_); catch (Exception) {}
+					if (got)
+					{
+						f.ciRef = rf[0] ~ " " ~ rf[1];
+						break;
+					}
+				}
+		}
+		else if (r.status == 404 || r.status == 451)
 			f.repo = RepoState.gone;
 		break;
 	default:
 		f.repo = RepoState.notChecked;
 	}
+}
+
+/// Refs to ask CI about, best first: latest release tag (v-prefixed, then
+/// bare), then the default branch. Each entry is [kind, ref].
+string[2][] ciRefs(const ref Facts f)
+{
+	string[2][] refs;
+	if (f.lastReleaseVersion.length)
+	{
+		refs ~= ["tag", "v" ~ f.lastReleaseVersion];
+		refs ~= ["tag", f.lastReleaseVersion];
+	}
+	if (f.defaultBranch.length)
+		refs ~= ["branch", f.defaultBranch];
+	return refs;
+}
+
+private void fetchGitHubCi(ref Facts f, string[] hdr, bool useCache, RunLog log)
+{
+	auto slug = f.repo == RepoState.moved ? f.repoMovedTo : f.repoSlug;
+	foreach (rf; ciRefs(f))
+	{
+		if (atomicLoad(githubRateLimited))
+			return;
+		auto base = format("%s/repos/%s/commits/%s/", githubApi, slug, encodeComponent(rf[1]));
+		auto cr = httpGet(base ~ "check-runs?per_page=50", hdr, useCache, log);
+		if (isRateLimit(cr)) { atomicStore(githubRateLimited, true); return; }
+		if (cr.status != 200)
+			continue; // 404/422: no such tag or branch, try the next ref
+		bool got;
+		try got = applyCheckRuns(f, cr.body_); catch (Exception) {}
+		if (!got)
+		{
+			auto sr = httpGet(base ~ "status", hdr, useCache, log);
+			if (isRateLimit(sr)) { atomicStore(githubRateLimited, true); return; }
+			if (sr.status == 200)
+				try got = applyCombinedStatus(f, sr.body_); catch (Exception) {}
+		}
+		if (got)
+		{
+			f.ciRef = rf[0] ~ " " ~ rf[1];
+			if (!f.ciUrl.length)
+				f.ciUrl = format("https://github.com/%s/commit/%s", slug, rf[1]);
+			return;
+		}
+		return; // the ref exists but has no CI: do not fall back to a different commit
+	}
+}
+
+/// Remembered per-repo state (first 404 date, last declared status).
+string repoStatePath()
+{
+	import std.path : dirName;
+	return buildPath(dirName(cacheDir()), "repo-state.json");
+}
+
+private JSONValue loadRepoState()
+{
+	try
+		if (exists(repoStatePath()))
+			return parseJSON(readText(repoStatePath()));
+	catch (Exception) {}
+	return JSONValue(string[string].init);
+}
+
+private void saveRepoState(JSONValue st)
+{
+	try
+	{
+		mkdirRecurse(cacheDir());
+		write(repoStatePath(), st.toPrettyString());
+	}
+	catch (Exception) {}
 }
 
 struct Row
@@ -684,8 +944,20 @@ int cmdSearch(SearchOptions o)
 	foreach (ref r; pool.parallel(rows, 1))
 		gather(r.facts, useCache, log);
 
-	auto resultNames = hits.map!(h => parentName(h.name)).array;
 	auto now = Clock.currTime(UTC());
+	auto state = loadRepoState();
+	foreach (ref r; rows)
+		syncRepoState(state, r.facts, now);
+	saveRepoState(state);
+
+	{
+		auto fs = rows.map!(r => r.facts).array;
+		computeDependents(fs);
+		foreach (i, ref r; rows)
+			r.facts.dependentsInResults = fs[i].dependentsInResults;
+	}
+
+	auto resultNames = hits.map!(h => parentName(h.name)).array;
 	foreach (ref r; rows)
 	{
 		r.verdict = classify(r.facts, resultNames, now);
@@ -741,6 +1013,14 @@ private void printHuman(const SearchOptions o, Row[] rows)
 			{
 				string[] d;
 				if (r.facts.repoSlug.length) d ~= r.facts.repoKind ~ ":" ~ r.facts.repoSlug;
+				if (r.facts.repo == RepoState.gone && !r.facts.repoGoneSince.isNull)
+					d ~= "repo unreachable since " ~ fmtDate(r.facts.repoGoneSince);
+				d ~= r.facts.ciState.length
+					? format("CI %s (%s, %s%s, reported by the package's own CI) %s", r.facts.ciState, r.facts.ciSource,
+						r.facts.ciRef, r.facts.ciDate.isNull ? "" : ", " ~ fmtDate(r.facts.ciDate), r.facts.ciUrl)
+					: "CI unknown";
+				if (r.facts.dependentsInResults.length)
+					d ~= "used by (in these results) " ~ r.facts.dependentsInResults.join(", ");
 				if (r.facts.openIssues >= 0) d ~= format("open issues+PRs %s", r.facts.openIssues);
 				if (r.facts.stars >= 0) d ~= format("stars %s", r.facts.stars);
 				if (r.facts.downloadsTotal >= 0) d ~= format("downloads %s total, %s/month", r.facts.downloadsTotal, r.facts.downloadsMonthly);
@@ -749,6 +1029,11 @@ private void printHuman(const SearchOptions o, Row[] rows)
 				writeln("  ", ' '.repeatChar(nameW), "  ", d.join(" | "));
 			}
 		}
+	}
+	if (rows.canFind!(r => r.facts.dependentsInResults.length > 0))
+	{
+		writeln();
+		writeln("\"used by\" counts only packages in these results; code.dlang.org has no reverse-dependency API.");
 	}
 }
 
@@ -777,8 +1062,10 @@ private JSONValue resultJson(const SearchOptions o, Row[] rows, ExitCode code, s
 	th["issueSample"] = defaultThresholds.issueSample;
 	th["answeredPercent"] = defaultThresholds.answeredPercent;
 	th["minIssues"] = defaultThresholds.minIssues;
+	th["goneGraceDays"] = defaultThresholds.goneGraceDays;
 	th["wrapperDescriptionPattern"] = wrapperDescriptionPattern;
 	j["thresholds"] = th;
+	j["dependentsScope"] = "search-results";
 	JSONValue[] pk;
 	foreach (r; rows)
 	{
@@ -804,7 +1091,20 @@ private JSONValue resultJson(const SearchOptions o, Row[] rows, ExitCode code, s
 		p["issuesSampled"] = r.facts.issuesSampled;
 		p["issuesAnswered"] = r.facts.issuesAnswered;
 		p["buildsWithCurrent"] = r.facts.buildsWithCurrent == -1 ? JSONValue(null) : JSONValue(r.facts.buildsWithCurrent == 1);
-		p["dependents"] = r.facts.dependents;
+		JSONValue ci;
+		ci["state"] = r.facts.ciState.length ? JSONValue(r.facts.ciState) : JSONValue("unknown");
+		ci["source"] = r.facts.ciSource.length ? JSONValue(r.facts.ciSource) : JSONValue(null);
+		ci["ref"] = r.facts.ciRef.length ? JSONValue(r.facts.ciRef) : JSONValue(null);
+		ci["date"] = fmtDate(r.facts.ciDate).length ? JSONValue(fmtDate(r.facts.ciDate)) : JSONValue(null);
+		ci["url"] = r.facts.ciUrl.length ? JSONValue(r.facts.ciUrl) : JSONValue(null);
+		ci["reportedBy"] = "package CI";
+		p["ci"] = ci;
+		p["repoGoneSince"] = fmtDate(r.facts.repoGoneSince).length ? JSONValue(fmtDate(r.facts.repoGoneSince)) : JSONValue(null);
+		JSONValue dep;
+		dep["scope"] = "search-results";
+		dep["count"] = r.facts.dependentsInResults.length;
+		dep["names"] = JSONValue(r.facts.dependentsInResults.map!(n => JSONValue(n)).array);
+		p["dependents"] = dep;
 		pk ~= p;
 	}
 	j["packages"] = JSONValue(pk);
