@@ -8,7 +8,7 @@
 module search;
 
 import core.atomic : atomicLoad, atomicStore;
-import std.algorithm : canFind, filter, map, max, sort;
+import std.algorithm : canFind, filter, map, max, min, sort;
 import std.array : array, join;
 import std.conv : to;
 import std.datetime : Clock, SysTime, UTC, hours, minutes;
@@ -21,7 +21,7 @@ import std.parallelism : TaskPool;
 import std.path : buildPath, baseName;
 import std.process : environment, pipeProcess, Redirect, wait, ProcessException;
 import std.stdio : File, stderr, stdout, writeln;
-import std.string : indexOf, lastIndexOf, startsWith, strip, toLower;
+import std.string : endsWith, indexOf, lastIndexOf, startsWith, strip, toLower;
 import std.typecons : Nullable;
 import std.uri : encodeComponent;
 
@@ -769,7 +769,11 @@ private void gather(ref Facts f, bool useCache, RunLog log)
 			}
 			// CI status the package's own CI reported (build-status step a).
 			if ((f.repo == RepoState.ok || f.repo == RepoState.moved) && !atomicLoad(githubRateLimited))
-				fetchGitHubCi(f, hdr, useCache, log);
+			{
+				auto slug = f.repo == RepoState.moved ? f.repoMovedTo : f.repoSlug;
+				if (!resolveGitHubCi(f, slug, (string u) => httpGet(u, hdr, useCache, log)))
+					atomicStore(githubRateLimited, true);
+			}
 			// Issue responsiveness only matters for quiet packages; saves API quota.
 			auto last = lastActivity(f);
 			if ((f.repo == RepoState.ok || f.repo == RepoState.moved) && !last.isNull
@@ -799,19 +803,7 @@ private void gather(ref Facts f, bool useCache, RunLog log)
 		{
 			try applyGitLab(f, r.body_); catch (Exception) {}
 			if (f.repo == RepoState.ok)
-				foreach (rf; ciRefs(f))
-				{
-					auto pr = httpGet(format("%s/projects/%s/pipelines?ref=%s&per_page=1", gitlabApi,
-						encodeComponent(f.repoSlug), encodeComponent(rf[1])), null, useCache, log);
-					bool got;
-					if (pr.status == 200)
-						try got = applyGitLabPipelines(f, pr.body_); catch (Exception) {}
-					if (got)
-					{
-						f.ciRef = rf[0] ~ " " ~ rf[1];
-						break;
-					}
-				}
+				resolveGitLabCi(f, (string u) => httpGet(u, null, useCache, log));
 		}
 		else if (r.status == 404 || r.status == 451)
 			f.repo = RepoState.gone;
@@ -821,51 +813,186 @@ private void gather(ref Facts f, bool useCache, RunLog log)
 	}
 }
 
-/// Refs to ask CI about, best first: latest release tag (v-prefixed, then
-/// bare), then the default branch. Each entry is [kind, ref].
-string[2][] ciRefs(const ref Facts f)
+/// Release tags to try for the latest registry version, in order.
+/// There is deliberately no branch fallback: a CI result is reported only
+/// when it belongs to exactly the commit the registry serves.
+string[] releaseTags(const ref Facts f)
 {
-	string[2][] refs;
-	if (f.lastReleaseVersion.length)
-	{
-		refs ~= ["tag", "v" ~ f.lastReleaseVersion];
-		refs ~= ["tag", f.lastReleaseVersion];
-	}
-	if (f.defaultBranch.length)
-		refs ~= ["branch", f.defaultBranch];
-	return refs;
+	if (!f.lastReleaseVersion.length)
+		return null;
+	return ["v" ~ f.lastReleaseVersion, f.lastReleaseVersion];
 }
 
-private void fetchGitHubCi(ref Facts f, string[] hdr, bool useCache, RunLog log)
+alias Fetch = HttpResult delegate(string url);
+
+/// Parse GitHub `git/ref/tags/<t>` or `git/tags/<sha>` JSON: returns
+/// [objectType, sha] of the object it points at.
+string[2] gitObject(string body_)
 {
-	auto slug = f.repo == RepoState.moved ? f.repoMovedTo : f.repoSlug;
-	foreach (rf; ciRefs(f))
+	auto j = parseJSON(body_);
+	auto o = "object" in j.object;
+	if (o is null || o.type != JSONType.object)
+		return ["", ""];
+	return [str(*o, "type"), str(*o, "sha")];
+}
+
+/// Merge two CI readings of the same commit: failing beats pending beats passing.
+private void mergeCi(ref Facts f, const ref Facts g)
+{
+	if (!g.ciState.length) return;
+	int rank(string s) { return s == "failing" ? 3 : s == "pending" ? 2 : s == "passing" ? 1 : 0; }
+	if (rank(g.ciState) > rank(f.ciState))
 	{
-		if (atomicLoad(githubRateLimited))
-			return;
-		auto base = format("%s/repos/%s/commits/%s/", githubApi, slug, encodeComponent(rf[1]));
-		auto cr = httpGet(base ~ "check-runs?per_page=50", hdr, useCache, log);
-		if (isRateLimit(cr)) { atomicStore(githubRateLimited, true); return; }
-		if (cr.status != 200)
-			continue; // 404/422: no such tag or branch, try the next ref
-		bool got;
-		try got = applyCheckRuns(f, cr.body_); catch (Exception) {}
-		if (!got)
-		{
-			auto sr = httpGet(base ~ "status", hdr, useCache, log);
-			if (isRateLimit(sr)) { atomicStore(githubRateLimited, true); return; }
-			if (sr.status == 200)
-				try got = applyCombinedStatus(f, sr.body_); catch (Exception) {}
-		}
-		if (got)
-		{
-			f.ciRef = rf[0] ~ " " ~ rf[1];
-			if (!f.ciUrl.length)
-				f.ciUrl = format("https://github.com/%s/commit/%s", slug, rf[1]);
-			return;
-		}
-		return; // the ref exists but has no CI: do not fall back to a different commit
+		f.ciState = g.ciState;
+		f.ciSource = g.ciSource;
+		if (g.ciUrl.length) f.ciUrl = g.ciUrl;
 	}
+	else if (f.ciSource.length && f.ciSource != g.ciSource && rank(g.ciState) == rank(f.ciState))
+		f.ciSource ~= "+" ~ g.ciSource;
+	f.ciDate = newer(f.ciDate, g.ciDate);
+}
+
+/// GitHub: resolve the latest release tag to its commit (peeling annotated
+/// tags), then read check runs and the combined status for that SHA.
+/// Returns false when GitHub rate-limited us.
+bool resolveGitHubCi(ref Facts f, string slug, Fetch get)
+{
+	auto tags = releaseTags(f);
+	if (!tags.length) { f.ciNoneReason = "no release version in the registry"; return true; }
+	string tag, sha;
+	foreach (t; tags)
+	{
+		auto r = get(format("%s/repos/%s/git/ref/tags/%s", githubApi, slug, encodeComponent(t)));
+		if (isRateLimit(r)) return false;
+		if (r.status != 200) continue;
+		string[2] o;
+		try o = gitObject(r.body_); catch (Exception) { continue; }
+		foreach (_; 0 .. 5) // peel annotated (possibly nested) tags
+		{
+			if (o[0] != "tag") break;
+			auto tr = get(format("%s/repos/%s/git/tags/%s", githubApi, slug, o[1]));
+			if (isRateLimit(tr)) return false;
+			if (tr.status != 200) { o = ["", ""]; break; }
+			try o = gitObject(tr.body_); catch (Exception) { o = ["", ""]; break; }
+		}
+		if (o[0] == "commit" && o[1].length) { tag = t; sha = o[1]; break; }
+	}
+	if (!sha.length) { f.ciNoneReason = "no tag v" ~ f.lastReleaseVersion ~ " or " ~ f.lastReleaseVersion ~ " in the repo"; return true; }
+	f.ciRef = tag;
+	f.ciSha = sha;
+	auto base = format("%s/repos/%s/commits/%s/", githubApi, slug, sha);
+	Facts a, b;
+	auto cr = get(base ~ "check-runs?per_page=100");
+	if (isRateLimit(cr)) return false;
+	if (cr.status == 200) try applyCheckRuns(a, cr.body_); catch (Exception) {}
+	auto sr = get(base ~ "status");
+	if (isRateLimit(sr)) return false;
+	if (sr.status == 200) try applyCombinedStatus(b, sr.body_); catch (Exception) {}
+	mergeCi(f, a);
+	mergeCi(f, b);
+	if (!f.ciState.length)
+		f.ciNoneReason = "no CI results on the release commit";
+	else if (!f.ciUrl.length || f.ciState == "passing")
+		f.ciUrl = format("https://github.com/%s/commit/%s", slug, sha);
+	return true;
+}
+
+/// GitLab: tag -> commit id (GitLab returns the peeled commit), then the
+/// newest pipeline for that SHA.
+void resolveGitLabCi(ref Facts f, Fetch get)
+{
+	auto tags = releaseTags(f);
+	if (!tags.length) { f.ciNoneReason = "no release version in the registry"; return; }
+	auto proj = gitlabApi ~ "/projects/" ~ encodeComponent(f.repoSlug);
+	foreach (t; tags)
+	{
+		auto r = get(proj ~ "/repository/tags/" ~ encodeComponent(t));
+		if (r.status != 200) continue;
+		string sha;
+		try
+		{
+			auto j = parseJSON(r.body_);
+			if (auto c = "commit" in j.object) sha = str(*c, "id");
+		}
+		catch (Exception) {}
+		if (!sha.length) continue;
+		f.ciRef = t;
+		f.ciSha = sha;
+		auto pr = get(proj ~ "/pipelines?sha=" ~ sha ~ "&per_page=1");
+		bool got;
+		if (pr.status == 200) try got = applyGitLabPipelines(f, pr.body_); catch (Exception) {}
+		if (!got) f.ciNoneReason = "no CI results on the release commit";
+		return;
+	}
+	f.ciNoneReason = "no tag v" ~ f.lastReleaseVersion ~ " or " ~ f.lastReleaseVersion ~ " in the repo";
+}
+
+unittest
+{
+	// Fake host: tag v1.0.0 is annotated and points at commit AAA; main HEAD
+	// is a different commit BBB whose CI fails. Only AAA may be reported.
+	string[] asked;
+	HttpResult fake(string url)
+	{
+		asked ~= url;
+		HttpResult r;
+		r.status = 200;
+		if (url.endsWith("/git/ref/tags/v1.0.0"))
+			r.body_ = `{"object":{"type":"tag","sha":"T1"}}`;
+		else if (url.endsWith("/git/tags/T1"))
+			r.body_ = `{"object":{"type":"commit","sha":"AAA"}}`;
+		else if (url.canFind("/commits/AAA/check-runs"))
+			r.body_ = `{"total_count":0,"check_runs":[]}`;
+		else if (url.canFind("/commits/AAA/status"))
+			r.body_ = `{"state":"pending","total_count":0,"statuses":[]}`;
+		else if (url.canFind("/commits/main/") || url.canFind("/commits/BBB/"))
+			r.body_ = `{"total_count":1,"check_runs":[{"status":"completed","conclusion":"failure"}]}`;
+		else
+			r.status = 404;
+		return r;
+	}
+	Facts f = { name: "p", lastReleaseVersion: "1.0.0", defaultBranch: "main" };
+	assert(resolveGitHubCi(f, "o/p", &fake));
+	assert(f.ciState == "" && f.ciSha == "AAA" && f.ciRef == "v1.0.0", f.ciState);
+	assert(f.ciNoneReason == "no CI results on the release commit");
+	assert(!asked.canFind!(u => u.canFind("main") || u.canFind("BBB")));
+
+	// A run from a push to main on the *same* commit counts: it tested the same code.
+	HttpResult fake2(string url)
+	{
+		HttpResult r;
+		r.status = 200;
+		if (url.endsWith("/git/ref/tags/v2.0.0")) r.status = 404;
+		else if (url.endsWith("/git/ref/tags/2.0.0")) r.body_ = `{"object":{"type":"commit","sha":"CCC"}}`;
+		else if (url.canFind("/commits/CCC/check-runs"))
+			r.body_ = `{"total_count":1,"check_runs":[{"status":"completed","conclusion":"success","completed_at":"2025-01-02T00:00:00Z"}]}`;
+		else if (url.canFind("/commits/CCC/status"))
+			r.body_ = `{"state":"pending","total_count":0,"statuses":[]}`;
+		else r.status = 404;
+		return r;
+	}
+	Facts g = { name: "q", lastReleaseVersion: "2.0.0" };
+	assert(resolveGitHubCi(g, "o/q", &fake2));
+	assert(g.ciState == "passing" && g.ciRef == "2.0.0" && g.ciSha == "CCC");
+
+	// No tag at all: no CI, never passing or failing.
+	Facts h = { name: "r", lastReleaseVersion: "3.0.0", defaultBranch: "main" };
+	assert(resolveGitHubCi(h, "o/r", &fake));
+	assert(h.ciState == "" && h.ciSha == "" && h.ciNoneReason.canFind("no tag"));
+
+	// GitLab: tag -> commit -> pipeline by SHA
+	HttpResult gl(string url)
+	{
+		HttpResult r;
+		r.status = 200;
+		if (url.endsWith("/repository/tags/v1.0.0")) r.body_ = `{"name":"v1.0.0","commit":{"id":"DDD"}}`;
+		else if (url.canFind("pipelines?sha=DDD")) r.body_ = `[{"status":"success","web_url":"w"}]`;
+		else r.status = 404;
+		return r;
+	}
+	Facts k = { name: "k", repoSlug: "o/k", lastReleaseVersion: "1.0.0" };
+	resolveGitLabCi(k, &gl);
+	assert(k.ciState == "passing" && k.ciSha == "DDD" && k.ciUrl == "w");
 }
 
 /// Remembered per-repo state (first 404 date, last declared status).
@@ -989,8 +1116,68 @@ private string fmtDate(const Nullable!SysTime t)
 	return t.isNull ? null : t.get.toISOExtString()[0 .. 10];
 }
 
+/// Public how-to for package authors: link CI to a release. dubx docs are
+/// not published to an Antora site (no antora.yml), so this is the GitHub view.
+enum ciHelpUrl = "https://github.com/dlang-supplemental/dubx/blob/main/docs/ci-status-for-releases.adoc";
+
+/// `text` as an OSC 8 hyperlink to `url`, or "text: url" when hyperlinks are off.
+string hyperlink(string text, string url, bool osc8)
+{
+	return osc8 ? "\x1b]8;;" ~ url ~ "\x1b\\" ~ text ~ "\x1b]8;;\x1b\\" : text ~ ": " ~ url;
+}
+
+unittest
+{
+	assert(hyperlink("how to fix", "https://x", true) == "\x1b]8;;https://x\x1b\\how to fix\x1b]8;;\x1b\\");
+	assert(hyperlink("how to fix", "https://x", false) == "how to fix: https://x");
+	string[string] env;
+	assert(!osc8Supported(true, env));
+	env["WT_SESSION"] = "1";
+	assert(osc8Supported(true, env) && !osc8Supported(false, env));
+	env["DUBX_NO_HYPERLINKS"] = "1";
+	assert(!osc8Supported(true, env));
+	string[string] vte = ["VTE_VERSION": "7200"];
+	assert(osc8Supported(true, vte));
+}
+
+/// OSC 8 only on a terminal known to render it (unknown terminals would show
+/// escape garbage). DUBX_NO_HYPERLINKS=1 turns it off.
+bool osc8Supported(bool isTty, const string[string] env)
+{
+	if (!isTty || "DUBX_NO_HYPERLINKS" in env)
+		return false;
+	auto get = (string k) => (k in env) ? env[k] : "";
+	import std.conv : to;
+	if (get("WT_SESSION").length || get("KONSOLE_VERSION").length || get("KITTY_WINDOW_ID").length
+		|| get("WEZTERM_EXECUTABLE").length || get("DOMTERM").length)
+		return true;
+	if (["vscode", "iTerm.app", "WezTerm", "Hyper", "ghostty", "Tabby"].canFind(get("TERM_PROGRAM")))
+		return true;
+	auto vte = get("VTE_VERSION");
+	try if (vte.length && vte.to!int >= 5000) return true; catch (Exception) {}
+	auto term = get("TERM");
+	return term.canFind("kitty") || term.canFind("foot") || term.canFind("ghostty") || term.canFind("wezterm");
+}
+
+private bool stdoutIsTty()
+{
+	version (Windows)
+	{
+		import core.sys.windows.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
+		DWORD mode;
+		return GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
+	}
+	else
+	{
+		import core.sys.posix.unistd : isatty;
+		return isatty(1) != 0;
+	}
+}
+
 private void printHuman(const SearchOptions o, Row[] rows)
 {
+	import std.process : environment;
+	auto osc8 = osc8Supported(stdoutIsTty(), environment.toAA);
 	size_t nameW = 4, verW = 3;
 	foreach (r; rows)
 	{
@@ -1016,9 +1203,10 @@ private void printHuman(const SearchOptions o, Row[] rows)
 				if (r.facts.repo == RepoState.gone && !r.facts.repoGoneSince.isNull)
 					d ~= "repo unreachable since " ~ fmtDate(r.facts.repoGoneSince);
 				d ~= r.facts.ciState.length
-					? format("CI %s (%s, %s%s, reported by the package's own CI) %s", r.facts.ciState, r.facts.ciSource,
-						r.facts.ciRef, r.facts.ciDate.isNull ? "" : ", " ~ fmtDate(r.facts.ciDate), r.facts.ciUrl)
-					: "CI unknown";
+					? format("CI %s (%s, %s @ %s%s, reported by the package's own CI) %s", r.facts.ciState, r.facts.ciSource,
+						r.facts.ciRef, r.facts.ciSha[0 .. min(7, $)], r.facts.ciDate.isNull ? "" : ", " ~ fmtDate(r.facts.ciDate), r.facts.ciUrl)
+					: "CI: none for release" ~ (r.facts.ciNoneReason.length ? " (" ~ r.facts.ciNoneReason ~ ")" : "")
+						~ " – " ~ hyperlink("how to link CI to a release", ciHelpUrl, osc8);
 				if (r.facts.dependentsInResults.length)
 					d ~= "used by (in these results) " ~ r.facts.dependentsInResults.join(", ");
 				if (r.facts.openIssues >= 0) d ~= format("open issues+PRs %s", r.facts.openIssues);
@@ -1034,6 +1222,14 @@ private void printHuman(const SearchOptions o, Row[] rows)
 	{
 		writeln();
 		writeln("\"used by\" counts only packages in these results; code.dlang.org has no reverse-dependency API.");
+	}
+	auto noCi = rows.filter!(r => !r.facts.ciState.length && r.facts.name.indexOf(':') < 0
+		&& r.verdict.bucket != Bucket.gone).array.length;
+	if (noCi && !o.verbose)
+	{
+		writeln();
+		writeln(format("%s package(s) have no CI status for their release. %s", noCi,
+			hyperlink("How to link CI to a release", ciHelpUrl, osc8)));
 	}
 }
 
@@ -1091,14 +1287,27 @@ private JSONValue resultJson(const SearchOptions o, Row[] rows, ExitCode code, s
 		p["issuesSampled"] = r.facts.issuesSampled;
 		p["issuesAnswered"] = r.facts.issuesAnswered;
 		p["buildsWithCurrent"] = r.facts.buildsWithCurrent == -1 ? JSONValue(null) : JSONValue(r.facts.buildsWithCurrent == 1);
-		JSONValue ci;
-		ci["state"] = r.facts.ciState.length ? JSONValue(r.facts.ciState) : JSONValue("unknown");
-		ci["source"] = r.facts.ciSource.length ? JSONValue(r.facts.ciSource) : JSONValue(null);
-		ci["ref"] = r.facts.ciRef.length ? JSONValue(r.facts.ciRef) : JSONValue(null);
-		ci["date"] = fmtDate(r.facts.ciDate).length ? JSONValue(fmtDate(r.facts.ciDate)) : JSONValue(null);
-		ci["url"] = r.facts.ciUrl.length ? JSONValue(r.facts.ciUrl) : JSONValue(null);
-		ci["reportedBy"] = "package CI";
-		p["ci"] = ci;
+		if (r.facts.ciState.length)
+		{
+			JSONValue ci;
+			ci["state"] = r.facts.ciState;
+			ci["source"] = r.facts.ciSource;
+			ci["tag"] = r.facts.ciRef;
+			ci["sha"] = r.facts.ciSha;
+			ci["date"] = fmtDate(r.facts.ciDate).length ? JSONValue(fmtDate(r.facts.ciDate)) : JSONValue(null);
+			ci["url"] = r.facts.ciUrl.length ? JSONValue(r.facts.ciUrl) : JSONValue(null);
+			ci["reportedBy"] = "package CI";
+			p["ci"] = ci;
+			p["ciReason"] = JSONValue(null);
+			p["ciHelpUrl"] = JSONValue(null);
+		}
+		else
+		{
+			p["ci"] = JSONValue(null);
+			p["ciReason"] = r.facts.ciNoneReason.length ? r.facts.ciNoneReason
+				: "not checked (subpackage, repo gone, host not supported, or GitHub rate limit)";
+			p["ciHelpUrl"] = ciHelpUrl;
+		}
 		p["repoGoneSince"] = fmtDate(r.facts.repoGoneSince).length ? JSONValue(fmtDate(r.facts.repoGoneSince)) : JSONValue(null);
 		JSONValue dep;
 		dep["scope"] = "search-results";

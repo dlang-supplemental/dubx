@@ -149,7 +149,11 @@ struct Facts
 	/// "" unknown, "passing", "failing", "pending".
 	string ciState;
 	string ciSource;   /// github-checks, github-status, gitlab-pipeline
-	string ciRef;      /// e.g. "tag v0.10.0" or "branch master"
+	string ciRef;      /// release tag the result belongs to, e.g. "v0.10.0"
+	string ciSha;      /// commit the release tag points at (annotated tags peeled)
+	/// Why there is no CI result for the release (no tag, no CI on that commit,
+	/// host not checked). Never counts as passing or failing.
+	string ciNoneReason;
 	string ciUrl;
 	Nullable!SysTime ciDate;
 
@@ -424,12 +428,12 @@ unittest
 	assert(classify(none, names, now).bucket == Bucket.unknown);
 
 	// CI passing is evidence for Finished; failing keeps Quiet
-	Facts q = { name: "q", repo: RepoState.ok, ciState: "passing", ciRef: "tag v1.0.0" };
+	Facts q = { name: "q", repo: RepoState.ok, ciState: "passing", ciRef: "v1.0.0" };
 	q.lastRelease = at(2019, 3);
 	q.ciDate = at(2019, 3);
 	auto qv = classify(q, names, now);
 	assert(qv.bucket == Bucket.finished, qv.reason);
-	assert(qv.reason.canFind("CI passing on tag v1.0.0 (2019-03)"), qv.reason);
+	assert(qv.reason.canFind("CI passing on v1.0.0 (2019-03)"), qv.reason);
 	q.ciState = "failing";
 	q.issuesSampled = 5; q.issuesAnswered = 5;
 	assert(classify(q, names, now).bucket == Bucket.quiet);
