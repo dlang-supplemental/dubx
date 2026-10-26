@@ -1,5 +1,14 @@
 = Changelog
 
+== 0.4.0 (2026-10-26)
+
+* `dubx search <query>` groups registry results (Active, Slow but alive, Finished or maintenance-only, Quiet, Declared deprecated or unmaintained, Repo gone or archived, Wrapper or subpackage) with a short reason per package, using the code.dlang.org API plus GitHub/GitLab (`GH_TOKEN` honoured, degrades on rate limit).
+* Maintainer-declared `x:status` in `dub.sdl`/`dub.json` beats the heuristics; old packages are *Quiet*, never *abandoned*.
+* `--verbose`, `--json`, `--no-cache`; `--raw` keeps the old `dub search` passthrough. 60-minute HTTP cache and per-run JSONL logs.
+* Draft upstream proposal: link:docs/upstream/dub-registry-grouped-search.md[docs/upstream/dub-registry-grouped-search.md].
+
+link:changelog-details/2026-10-26 - grouped search.adoc[Details]
+
 == 0.3.6 (2026-08-07)
 
 * Include embed/ and strimport/ in the repo so release CI string imports work.

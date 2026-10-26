@@ -1,0 +1,22 @@
+= Grouped search (0.4.0)
+
+== What changed
+
+`dubx search` used to forward to `redub`/`dub search`, which prints a flat list.
+It is now a dubx command that groups code.dlang.org results by status and gives each package a short reason.
+`dubx search <query> --raw` keeps the old passthrough.
+
+== Why
+
+Searching for `yaml` showed `yaml-d` (one 2017 release, GitHub repo 404) next to `dyaml` with nothing to tell them apart.
+
+== Design decisions
+
+* Only hard facts are verdicts: repo 404/451, repo archived, maintainer-declared `x:status`.
+* Age only produces neutral groups (*Slow but alive*, *Quiet*) and the reason shows the dates.
+* "Quiet but answers issues" is shown as *Finished or maintenance-only*. "Still builds with current DMD/LDC" and "dependents" are hooks in `Facts` with no data source yet.
+* `x:status` is read from the raw recipe on GitHub because dub drops unknown recipe keys before the registry stores them.
+* All thresholds live in `struct Thresholds` in `source/search_heuristics.d`.
+* HTTP goes through the system `curl`; the token goes on stdin, not argv.
+
+See link:../docs/search.adoc[docs/search.adoc] and link:../docs/upstream/dub-registry-grouped-search.md[the upstream proposal].

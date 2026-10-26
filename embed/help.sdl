@@ -15,6 +15,7 @@ command "dubx" {
         example "Register via dub-publish" "dubx publish register --ignore-fork"
         example "Login via publish namespace" "dubx publish login --user NAME --save-credentials"
         example "Local/private mirror via dubproxy" "dubx local -h"
+        example "Grouped registry search" "dubx search yaml"
         example "See which backends are on PATH" "dubx which"
     }
 
@@ -31,10 +32,21 @@ command "dubx" {
     section "build" {
         summary "Build verbs -> redub (fallback dub)"
         inline true
-        content "build run test describe lint clean fetch upgrade add convert search list ..."
+        content "build run test describe lint clean fetch upgrade add convert list ..."
 
         example "Force dub" "dubx dub build"
         example "Force redub" "dubx redub build"
+    }
+
+    section "search" {
+        summary "Grouped registry search"
+        content "dubx search <query> asks code.dlang.org and GitHub/GitLab, then groups hits: Active, Slow but alive, Finished or maintenance-only, Quiet, Declared deprecated or unmaintained, Repo gone or archived, Wrapper or subpackage. Each row has a short reason (dates, repo 404/archived). A maintainer-declared x:status in dub.sdl/dub.json beats the heuristics. Set GH_TOKEN for more GitHub requests. Exit: 0 ok, 2 usage, 3 network."
+
+        example "Grouped search" "dubx search yaml"
+        example "More facts + log" "dubx search yaml --verbose"
+        example "Machine-readable" "dubx search yaml --json"
+        example "Skip the 60-minute cache" "dubx search yaml --no-cache"
+        example "Old dub search passthrough" "dubx search yaml --raw"
     }
 
     section "registry" {

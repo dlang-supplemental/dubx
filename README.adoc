@@ -136,7 +136,12 @@ dubx login --user you --save-credentials
 dubx publish --ignore-fork
 dubx hooks -n mypkg
 dubx update -n mypkg
+
+dubx search yaml            # grouped: Active / Quiet / Repo gone / Wrapper ...
+dubx search yaml --json
 ----
+
+`dubx search` groups code.dlang.org results by status with a one-line reason per package (`yaml-d`: _single release 0.0.1 (2017-05), repo 404_). Age alone never marks a package dead: old packages land in a neutral *Quiet* group with their dates. A maintainer can declare `x:status "complete"` in `dub.sdl` to say a package is finished. Details: link:docs/search.adoc[docs/search.adoc]. `--raw` keeps the old `dub search` passthrough.
 
 Passthrough escapes:
 
