@@ -1,4 +1,6 @@
-# Draft issue for dlang/dub (not filed)
+# Issue for dlang/dub
+
+Filed as https://github.com/dlang/dub/issues/3174 (2026-10-26).
 
 **Title:** Report locally substituted dependencies: a notice in interactive use, an error in CI, and a list in `dub describe`
 
@@ -35,7 +37,7 @@ CI must build what the registry serves. In CI, a dependency that resolves to a l
 
 - Detect CI from `CI=true` and common provider variables (`GITHUB_ACTIONS`, `GITLAB_CI`, `BUILDKITE`, `TF_BUILD`, `JENKINS_URL`, `TEAMCITY_VERSION`, `CIRCLECI`, `APPVEYOR`, `TRAVIS`, ...), plus an explicit switch such as `--ci` or `DUB_CI=1`.
 - Offer an explicit opt-in, for example `--allow-local-overrides` or `DUB_ALLOW_LOCAL_OVERRIDES=1`. With it the build continues, but each substitution is still logged.
-- Decision needed: a `path=` dependency declared in the root recipe that stays inside the project tree (submodules, sub-packages via `path=".."`) is a declared part of the project, not a substitution. It probably should be exempt, or at least distinguished from paths outside the root package.
+- `path=` dependencies that point inside the project's own repository (submodules, vendored folders, sub-packages via `path=".."`) are exempt from the CI error: they are part of the project, not a substitution. They are still listed in `dub describe` (source `recipe-path`) but not reported as overrides. Only overrides (`local-overrides.json`), `add-local`/`add-path` registrations, path selections in `dub.selections.json`, and `path=` dependencies that resolve outside the repository root count. The repository root is the nearest enclosing VCS root (e.g. `.git`), falling back to the root package directory.
 
 ### 3. Machine-readable output
 
@@ -57,6 +59,7 @@ CI must build what the registry serves. In CI, a dependency that resolves to a l
 - #2506 Fix #2425: Do not select path / repository based dependency (open)
 - #2956 `dub add <packagename>` ignores local packages (open)
 - #3002 "dub add-local" doesn't work for Git dependencies (open)
+- #937 Command to list dependency paths being used (closed)
 - #772 dub.selections.json not updated if dependency with path is used (closed)
 - #50 Support non-repo packages (closed)
 

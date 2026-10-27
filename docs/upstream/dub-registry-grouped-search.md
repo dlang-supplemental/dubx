@@ -1,5 +1,5 @@
 <!--
-Draft only. Not filed. Target: https://github.com/dlang/dub-registry (issue first, then PR).
+Filed as https://github.com/dlang/dub-registry/issues/629 (2026-10-26). PR to follow.
 Prepared against dub-registry commit a7671f8 (2026-10-26). Reference implementation:
 dubx `search` (source/search_heuristics.d) in https://github.com/dlang-supplemental/dubx.
 -->
