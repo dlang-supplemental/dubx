@@ -7,8 +7,8 @@
 * Packages without a release CI status link (OSC 8 hyperlink on capable terminals, plain URL otherwise; `ciHelpUrl` in JSON) to the new author how-to link:docs/ci-status-for-releases.adoc[Link your CI to your release].
 * `used by N of these results`: dependents counted among the search results only (no registry reverse-dependency API).
 * A repo answering 404/451 overrides a declared `x:status` only after 30 days (`goneGraceDays`); until then the reason says `repo unreachable since <date>`. First-seen dates live in `repo-state.json` in the dubx cache.
-* Upstream proposal gains *Dependency graph* and *Build status* sections.
-* Build: `prohelp` is now a registry dependency (`~>0.2.3` from code.dlang.org) instead of `path="deps/prohelp"`; CI no longer checks prohelp out. README documents `dub add-local` for testing against a local copy.
+* Upstream proposal gains *Dependency graph* and *Build status* sections; filed as https://github.com/dlang/dub-registry/issues/629[dlang/dub-registry#629]. Local-override notice filed as https://github.com/dlang/dub/issues/3174[dlang/dub#3174].
+* Build: `prohelp` is now a registry dependency (`~>0.2.4` from code.dlang.org) instead of `path="deps/prohelp"`; CI no longer checks prohelp out. README documents `dub add-local` for testing against a local copy.
 
 link:changelog-details/2026-10-26 - dispatch fix and search ci.adoc[Details]
 

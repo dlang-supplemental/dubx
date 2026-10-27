@@ -11,7 +11,7 @@ Any first word that `redub` does not recognise is passed to `runMain` as a packa
 
 redub's help is also **incomplete**. `redub --help` lists `init`, `run`, `build`, `test`, `describe` and `clean`, then `update`, `build-universal`, `watch`, `install` and `use` under "Additions to redub commands". It omits `setup`, `deps` and `configure`, which are in the dispatch table (CD-16). Please keep a documented, complete list of command tokens that also says which `dub` commands redub implements, forwards or rejects (CD-17).
 
-The requirements below cite the OpenShellOrg **CLI Dispatch** standard by rule ID ([standard](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-dispatch.adoc), [CLI Styles](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-styles.adoc), [rationale](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-dispatch-rationale.adoc), [implementer notes](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-dispatch-implementers.adoc), [conformance](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/certification-cli-dispatch.adoc)).
+The requirements below cite the OpenShellOrg **CLI Dispatch** standard by rule ID ([standard](https://docs.opensh.org/open-shell-org/standard-cli-dispatch/), [CLI Styles](https://docs.opensh.org/open-shell-org/standard-cli-styles/), [rationale](https://docs.opensh.org/open-shell-org/standard-cli-dispatch-rationale/), [implementer notes](https://docs.opensh.org/open-shell-org/standard-cli-dispatch-implementers/), [conformance](https://docs.opensh.org/open-shell-org/certification-cli-dispatch/)).
 
 ## Current behaviour (checked against `main` @ 7cf2af7, `RedubVersionOnly = "v1.32.1"`)
 
@@ -28,7 +28,7 @@ return runMain(args, runArgs);
 
 Any other first word falls through to `runMain` → `resolveDependencies` (`source/redub/extensions/cli.d`) → `redub.api.resolveDependencies`. There `getPackageFromCli` takes the word as the target package and, via `shouldFetchPackage` / `findPackage(targetPackage, null, packageVersion, "redub-run")`, **fetches, builds and runs it**. Concretely:
 
-- `redub search json` (`search` is a dub command that redub does not implement) tries to fetch and run a package named `search`. This is how `dubx search` came to fetch an unrelated package. See the worked example ("Worked migration: redub") in the [standard](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-dispatch.adoc).
+- `redub search json` (`search` is a dub command that redub does not implement) tries to fetch and run a package named `search`. This is how `dubx search` came to fetch an unrelated package. See the worked example ("Worked migration: redub") in the [standard](https://docs.opensh.org/open-shell-org/standard-cli-dispatch/).
 - A typo such as `redub biuld` does not get a did-you-mean. It becomes a package lookup.
 - `redub help` is not a command either. It is looked up as a package named `help`. Only `redub --help` works, because it starts with `-` and reaches getopt's `helpWanted`.
 - Bare `redub` runs `runMain` silently. The help text says that redub defaults to `run` when the command is omitted, but the run itself does not announce the default (CD-6).
@@ -72,7 +72,7 @@ $ echo $?
 
 ### One declared style, per CS-9 (and CS-1, CS-3, CS-4)
 
-redub should declare one style for its whole command surface and keep to it ([CS-9](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/standard-cli-styles.adoc)). Today the top level mixes them: known tokens are taken literally, and anything else is resolved loosely as a package to fetch and run. CS-9 rules out that mix. CS-3 also says no style may make top-level dispatch loose, and CS-4 says no style may silently fetch, build or run. The natural declaration is strict, which is the default under CS-1 and what this issue asks for. If redub ever wants resolver-style behaviour, CS-9 requires it to ship as a separate tool.
+redub should declare one style for its whole command surface and keep to it ([CS-9](https://docs.opensh.org/open-shell-org/standard-cli-styles/)). Today the top level mixes them: known tokens are taken literally, and anything else is resolved loosely as a package to fetch and run. CS-9 rules out that mix. CS-3 also says no style may make top-level dispatch loose, and CS-4 says no style may silently fetch, build or run. The natural declaration is strict, which is the default under CS-1 and what this issue asks for. If redub ever wants resolver-style behaviour, CS-9 requires it to ship as a separate tool.
 
 ### Documented command-token list, per CD-4, CD-16, CD-17
 
@@ -86,7 +86,7 @@ redub should declare one style for its whole command surface and keep to it ([CS
 
 ## Certification
 
-When the 1.x warning release ships, redub can self-declare **Migrating** conformance. After 2.0 ships with strict as the default, it can self-declare **Strict** conformance. The levels and self-test are in [certification-cli-dispatch.adoc](https://github.com/openshellorg/docs/blob/9852cdb/docs/modules/ROOT/pages/certification-cli-dispatch.adoc). I'd like to invite you to run the self-test and certify.
+When the 1.x warning release ships, redub can self-declare **Migrating** conformance. After 2.0 ships with strict as the default, it can self-declare **Strict** conformance. The levels and self-test are in [certification-cli-dispatch.adoc](https://docs.opensh.org/open-shell-org/certification-cli-dispatch/). I'd like to invite you to run the self-test and certify.
 
 ## Related
 

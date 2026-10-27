@@ -12,7 +12,7 @@ versions "DubxCli"
 
 # prohelp comes from code.dlang.org. For local co-development use dub add-local
 # (see README "Testing against a local prohelp"); never a path dependency here.
-dependency "prohelp" version="~>0.2.3"
+dependency "prohelp" version="~>0.2.4"
 dependency "sdlang-d" version="~>0.10.6"
 
 importPaths "source"
