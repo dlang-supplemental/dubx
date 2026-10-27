@@ -1,4 +1,4 @@
-Not filed yet. Draft for haskell/cabal.
+Filed: https://github.com/haskell/cabal/issues/12494
 
 # `-f-foo` (disable flag `foo`) is visually ambiguous; consider a clearer spelling and deprecate the old one
 
@@ -24,7 +24,7 @@ In `cabal.project` the `flags:` field uses `+foo` / `-foo`, so the `+`/`-` prefi
 
 ## Suggested alternatives (any one would help)
 
-1. **Recommend `--flags=-foo` / `--flags=+foo` in docs and `--help`.** This already works (the `--flags` form). The docs could lead with it and use `+` for "on", matching `cabal.project`.
+1. **Recommend `--flags=-foo` / `--flags=+foo` in docs and `--help`.** Both already work: with cabal-install 3.10.2.0, `cabal build --dry-run --flags=+foo` is accepted, while an invalid prefix such as `--flags=*foo` is rejected. Only the bare and `-` forms are documented, though. The docs could lead with `--flags=` and document `+` for "on", matching `cabal.project`.
 2. **Accept an explicit, separated value:** `-f '+foo'` / `-f '-foo'` (with a space, the value is clearly an argument), or a non-dash negation such as `-f !foo` (note: `!` needs quoting in some shells).
 3. **Long-form-only negation:** only treat a leading `-` as negation inside `--flags=...`, and make `+foo`/`-foo` the documented spelling there.
 
