@@ -1,0 +1,159 @@
+<a id="readme-top"></a>
+<div align="center">
+<a href="https://github.com/dlang-supplemental/dubx/graphs/contributors"><img src="https://img.shields.io/github/contributors/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Contributors"></a>
+<a href="https://github.com/dlang-supplemental/dubx/network/members"><img src="https://img.shields.io/github/forks/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Forks"></a>
+<a href="https://github.com/dlang-supplemental/dubx/stargazers"><img src="https://img.shields.io/github/stars/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Stars"></a>
+<a href="https://github.com/dlang-supplemental/dubx/issues"><img src="https://img.shields.io/github/issues/dlang-supplemental/dubx.svg?style=for-the-badge" alt="Issues"></a>
+<a href="https://github.com/dlang-supplemental/dubx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/dlang-supplemental/dubx.svg?style=for-the-badge" alt="License"></a>
+<br />
+<h3 align="center">dubx</h3>
+<p align="center">
+Thin meta-CLI for D package workflows: redub for builds, dub-publish for registry owner ops.<br />
+<a href="https://github.com/dlang-supplemental/dubx/issues">Report Bug</a>
+&middot;
+<a href="https://github.com/dlang-supplemental/dubx/issues">Request Feature</a>
+</p>
+</div>
+
+
+## About The Project
+
+It does **not** reimplement the backends — it routes to them:
+
+* **Build / resolve** → https://code.dlang.org/packages/redub[`redub`] (falls back to `dub` if `redub` is missing)
+* **Registry owner ops** → https://github.com/dlang-supplemental/dub-publish[`dub-publish`] (register, login, hooks, logo, …)
+
+Official `dub` has no publish command; `redub` is a separate build system. `dubx` is the small glue so you do not have to remember which binary owns which verb.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Installation
+
+Supported release targets: **windows-x64**, **linux-x64**, **macos-x64**, **macos-arm64** (arm only on macOS).
+
+### Windows
+
+Download the `windows-x64` zip from https://github.com/dlang-supplemental/dubx/releases[Releases], extract, then:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Or from nushell: `nu install.nu`
+
+That installs to `%LOCALAPPDATA%\Programs\dlang-supplemental\dubx` and adds it to your **User PATH**. Refresh PATH:
+
+```powershell
+$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+dubx version
+```
+
+```nushell
+$env.PATH = ($env.PATH | prepend $"($env.LOCALAPPDATA)\\Programs\\dlang-supplemental\\dubx")
+```
+
+### macOS / Linux
+
+```console
+bash ./install.sh
+# or: nu install.nu
+```
+
+A **rolling** prerelease tracks `main` (`tag: rolling`).
+
+Also put backends on PATH:
+
+* **dub-publish** — https://github.com/dlang-supplemental/dub-publish/releases (same installer pattern)
+* **redub** (or `dub`) for builds — e.g. `dub fetch redub` and put the binary on PATH
+
+### Winget
+
+Package id: `dlang-supplemental.dubx` (CI ready; first listing needs a one-time winget-pkgs PR + `WINGET_TOKEN`).
+
+### From source
+
+Dependencies (`prohelp`, `sdlang-d`) come from https://code.dlang.org[code.dlang.org]; no extra checkout is needed.
+
+```console
+git clone https://github.com/dlang-supplemental/dubx.git
+cd dubx
+dub build --build=release
+```
+
+### Testing against a local prohelp
+
+To build against a local `prohelp` checkout instead of the registry copy, register it with DUB locally (testing only; never commit a path dependency):
+
+```console
+dub add-local C:\code\github.com\openshellorg\prohelp 0.2.3
+dub build --force
+# when done:
+dub remove-local C:\code\github.com\openshellorg\prohelp
+```
+
+Pass an explicit version that satisfies `~>0.2.3`; otherwise DUB derives it from the checkout's git state. Alternatively, put a path entry in this repo's `dub.selections.json` (`"prohelp": {"path": "C:/code/github.com/openshellorg/prohelp"}`); that file is git-ignored here, so do not force-add it.
+
+WARNING: DUB does not currently warn when a local package or a selections path entry is active. Run `dub list` (look for your path) or `dub describe prohelp` to confirm which copy is used, and remove the local registration before judging a registry build. `dub add-override` is deprecated upstream; do not use it.
+
+Then `packaging/install.ps1` or put `dubx` on `PATH`.
+
+Check discovery:
+
+```console
+dubx which
+```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Usage
+
+```console
+dubx build
+dubx test
+dubx run -- --help
+
+dubx login --user you --save-credentials
+dubx publish --ignore-fork
+dubx hooks -n mypkg
+dubx update -n mypkg
+
+dubx search yaml            # grouped: Active / Quiet / Repo gone / Wrapper ...
+dubx search yaml --json
+```
+
+`dubx search` groups code.dlang.org results by status with a one-line reason per package (`yaml-d`: _single release 0.0.1 (2017-05), repo 404_). Age alone never marks a package dead: old packages land in a neutral *Quiet* group with their dates. A maintainer can declare `x:status "complete"` in `dub.sdl` to say a package is finished. Details: [docs/search.adoc](docs/search.adoc). `--raw` keeps the old `dub search` passthrough.
+
+Passthrough escapes:
+
+```console
+dubx redub build --compiler=ldc2
+dubx dub build
+dubx dub-publish status -n mypkg
+```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Design
+
+* No forking of `redub` or `dub` — stay out of build-system compatibility debt.
+* Registry features stay in `dub-publish`.
+* `dubx` only maps verbs → executables on `PATH` (and siblings next to the `dubx` binary).
+
+## Changelog
+
+See [CHANGELOG](CHANGELOG.adoc).
+
+## License
+
+Boost Software License 1.0 — see [LICENSE](LICENSE).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Contact
+
+DLang Supplemental — dlang@devcentr.org
+
+* Project: https://github.com/dlang-supplemental/dubx
+* Site: https://dlang-supplemental.github.io
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>

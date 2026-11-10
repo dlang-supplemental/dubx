@@ -1,5 +1,11 @@
 = Changelog
 
+== 2026-11-10
+
+=== Registry readme
+
+* Version 0.5.1 publishes a root `README.md` so code.dlang.org can show the listing.
+
 == 0.5.0 (2026-10-26)
 
 * Fix: built-in commands always win. `dubx search …` on 0.3.x went to redub, which fetched and ran a registry package named `search`. Unknown first words now print a hint (did-you-mean, `dubx dub run <pkg>`) and exit 2 instead of fetching; verbs redub does not know (`fetch`, `list`, `add`, …) go to dub.
