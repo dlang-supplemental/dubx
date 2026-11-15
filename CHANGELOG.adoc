@@ -1,5 +1,12 @@
 = Changelog
 
+== 2026-11-15
+
+=== README contents list
+
+* The README contents list now sits under the header inside the expander.
+* Detail: link:changelog-details/2026-11-15%20-%20readme-contents-list.adoc[README contents list].
+
 == 2026-11-10
 
 === Registry readme

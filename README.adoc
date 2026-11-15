@@ -1,5 +1,6 @@
 ifndef::env-github[:icons: font]
-:toc: preamble
+:toc: macro
+:toc-title:
 :toclevels: 2
 :sectanchors:
 
@@ -38,6 +39,15 @@ Thin meta-CLI for D package workflows: redub for builds, dub-publish for registr
 link:https://github.com/dlang-supplemental/dubx/issues[Report Bug] ·
 link:https://github.com/dlang-supplemental/dubx/issues[Request Feature]
 endif::[]
+
+++++
+<details>
+<summary>Table of Contents</summary>
+++++
+toc::[]
+++++
+</details>
+++++
 
 == About The Project
 
